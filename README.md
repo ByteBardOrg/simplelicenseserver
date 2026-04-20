@@ -1,0 +1,2 @@
+# simplelicenseserver
+https://simplelicenseserver.org
