@@ -14,6 +14,27 @@ export const docsIndex = [
     keywords: ["docker", "compose", "setup", "install"]
   },
   {
+    href: "/docs/concepts/",
+    title: "Concepts",
+    summary: "Understand slugs, seats, activation flow, and license lifecycle behavior.",
+    icon: "bx-bulb",
+    keywords: ["concepts", "slug", "seats", "licenses", "activation", "lifecycle"]
+  },
+  {
+    href: "/docs/configuration/",
+    title: "Configuration",
+    summary: "All environment variables, defaults, and validation behavior.",
+    icon: "bx-slider-alt",
+    keywords: ["configuration", "env", "variables", "defaults", "options", "settings"]
+  },
+  {
+    href: "/docs/guides/stripe/",
+    title: "Stripe Example",
+    summary: "Stripe + Vercel webhook example for automatic license generation.",
+    icon: "bx-purchase-tag",
+    keywords: ["stripe", "example", "vercel", "webhook", "checkout", "generate"]
+  },
+  {
     href: "/docs/api/",
     title: "API Endpoints",
     summary: "Provisioning and runtime endpoints with examples.",

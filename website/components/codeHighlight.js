@@ -1,11 +1,15 @@
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-json";
+import "prismjs/components/prism-typescript";
+import "prismjs/components/prism-yaml";
 
 const languageAliases = {
   shell: "bash",
   sh: "bash",
-  zsh: "bash"
+  zsh: "bash",
+  ts: "typescript",
+  yml: "yaml"
 };
 
 function resolveLanguage(language = "bash") {

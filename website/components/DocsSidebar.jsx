@@ -7,6 +7,9 @@ import { apiEndpointOrder, apiEndpoints, endpointDocHref } from "./apiReferenceD
 const baseLinks = [
   { href: "/docs/", title: "Overview", icon: "bx-home-alt-2" },
   { href: "/docs/quickstart/", title: "Quickstart", icon: "bx-rocket" },
+  { href: "/docs/concepts/", title: "Concepts", icon: "bx-bulb" },
+  { href: "/docs/configuration/", title: "Configuration", icon: "bx-slider-alt" },
+  { href: "/docs/guides/stripe/", title: "Stripe Example", icon: "bx-purchase-tag" },
   { href: "/docs/api/", title: "API Endpoints", icon: "bx-code-alt" }
 ];
 
