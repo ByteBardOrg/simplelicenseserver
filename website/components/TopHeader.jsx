@@ -7,7 +7,10 @@ export default function TopHeader() {
       <div className="container nav-inner">
         <div className="nav-main">
           <Link href="/" className="brand">
-            Simple License Server
+            <span className="brand-mark" aria-hidden="true">
+              <img src="/simplelicenseserver_logo.svg" alt="" />
+            </span>
+            <span>Simple License Server</span>
           </Link>
 
           <nav className="nav-links" aria-label="Main">

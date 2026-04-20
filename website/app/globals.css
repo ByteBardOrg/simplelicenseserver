@@ -82,9 +82,29 @@ a {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
   font-weight: 800;
   font-size: 1.1rem;
   letter-spacing: -0.02em;
+}
+
+.brand-mark {
+  width: 1.62rem;
+  height: 1.62rem;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 24px rgba(96, 165, 250, 0.2);
+}
+
+.brand-mark img {
+  width: auto;
+  height: 86%;
+  display: block;
 }
 
 .nav-links {
