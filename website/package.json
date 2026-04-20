@@ -1,0 +1,17 @@
+{
+  "name": "simple-license-server-website",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "preview": "npx serve out"
+  },
+  "dependencies": {
+    "boxicons": "^2.1.4",
+    "next": "^16.2.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
