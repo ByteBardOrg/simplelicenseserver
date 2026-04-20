@@ -1,2 +1,2 @@
 # simplelicenseserver
-https://simplelicenseserver.org
+https://simplelicenseserver.com
