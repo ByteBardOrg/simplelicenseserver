@@ -1,5 +1,18 @@
 import Link from "next/link";
 import DockerPullCard from "../../components/DockerPullCard";
+import { codeLanguageClass, highlightCode } from "../../components/codeHighlight";
+
+const homeApiExample = `curl -X POST http://localhost:8080/activate \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer <your_api_key>" \\
+  -d '{
+    "license_key": "ABCD-1234-EFGH-5678",
+    "fingerprint": "machine-uuid-9876",
+    "metadata": {
+      "os": "linux",
+      "version": "1.0"
+    }
+  }'`;
 
 export const metadata = {
   title: "Simple License Server | Self-Hosted License API for Developers",
@@ -33,17 +46,12 @@ export default function HomePage() {
               <span className="eyebrow">API Example</span>
               <span className="easy-code-endpoint">POST /activate</span>
             </div>
-            <pre className="easy-code-body">{`curl -X POST http://localhost:8080/activate \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer <your_api_key>" \\
-  -d '{
-    "license_key": "ABCD-1234-EFGH-5678",
-    "fingerprint": "machine-uuid-9876",
-    "metadata": {
-      "os": "linux",
-      "version": "1.0"
-    }
-  }'`}</pre>
+            <pre className="easy-code-body">
+              <code
+                className={codeLanguageClass("bash")}
+                dangerouslySetInnerHTML={{ __html: highlightCode(homeApiExample, "bash") }}
+              ></code>
+            </pre>
           </article>
 
           <div className="easy-feature-list">

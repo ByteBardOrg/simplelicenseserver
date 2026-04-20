@@ -68,6 +68,21 @@ export default async function EndpointPage({ params }) {
       </div>
 
       <article className="card" style={{ marginTop: "1rem" }}>
+        <h3>Response field types</h3>
+        <div className="api-response-fields">
+          {endpoint.responseFields.map((field) => (
+            <div className="api-response-field" key={field.name}>
+              <p className="api-response-field-name">
+                <code>{field.name}</code>
+              </p>
+              <p className="api-response-field-type">{field.type}</p>
+              <p>{field.description}</p>
+            </div>
+          ))}
+        </div>
+      </article>
+
+      <article className="card" style={{ marginTop: "1rem" }}>
         <h3>Error codes</h3>
         <div className="api-errors-list">
           {endpoint.errorCodes.map((error) => (

@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { codeLanguageClass, highlightCode } from "./codeHighlight";
 
 export default function CodeExample({ language = "bash", code }) {
   const [copied, setCopied] = useState(false);
+  const languageClass = codeLanguageClass(language);
+  const highlightedCode = highlightCode(code, language);
 
   const onCopy = async () => {
     try {
@@ -29,7 +32,9 @@ export default function CodeExample({ language = "bash", code }) {
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre className="code-panel-body">{code}</pre>
+      <pre className="code-panel-body">
+        <code className={languageClass} dangerouslySetInnerHTML={{ __html: highlightedCode }}></code>
+      </pre>
     </div>
   );
 }

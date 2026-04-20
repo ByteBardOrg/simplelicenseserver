@@ -65,6 +65,18 @@ export const apiEndpoints = {
   "expires_at": "2026-10-20T12:00:00Z",
   "created_at": "2026-04-20T12:00:00Z"
 }`,
+    responseFields: [
+      { name: "license_key", type: "string", description: "Generated license key." },
+      { name: "slug", type: "string", description: "Product slug used at generation time." },
+      { name: "status", type: '"inactive" | "active" | "revoked"', description: "Current license status." },
+      { name: "metadata", type: "object", description: "Arbitrary metadata object that was stored with the license." },
+      {
+        name: "expires_at",
+        type: "string | null",
+        description: "RFC3339 timestamp when the license expires, or null for non-expiring slug policies."
+      },
+      { name: "created_at", type: "string", description: "RFC3339 creation timestamp." }
+    ],
     errorCodes: [
       { status: 400, reason: "Invalid JSON, missing slug, oversized fields, or invalid metadata structure." },
       { status: 401, reason: "Missing or invalid server API key." },
@@ -101,6 +113,12 @@ export const apiEndpoints = {
   "license_key": "XXXX-XXXX-XXXX-XXXX",
   "revoked_at": "2026-04-20T12:00:00Z"
 }`,
+    responseFields: [
+      { name: "valid", type: "boolean", description: "Always false for a successful revoke response." },
+      { name: "status", type: '"revoked"', description: "License status after revocation." },
+      { name: "license_key", type: "string", description: "License key that was revoked." },
+      { name: "revoked_at", type: "string", description: "RFC3339 timestamp when revocation was recorded." }
+    ],
     errorCodes: [
       { status: 400, reason: "Invalid JSON or missing license_key." },
       { status: 401, reason: "Missing or invalid server API key." },
@@ -147,6 +165,26 @@ export const apiEndpoints = {
   "expires_at": "2026-10-20T12:00:00Z",
   "reason": ""
 }`,
+    responseFields: [
+      { name: "valid", type: "boolean", description: "Whether activation succeeded for this fingerprint." },
+      {
+        name: "status",
+        type: '"inactive" | "active" | "revoked"',
+        description: "License status returned by the activation decision."
+      },
+      { name: "license_key", type: "string", description: "License key provided in the request." },
+      { name: "fingerprint", type: "string", description: "Fingerprint evaluated for activation." },
+      {
+        name: "expires_at",
+        type: "string | null",
+        description: "RFC3339 timestamp when the license expires, or null when the license does not expire."
+      },
+      {
+        name: "reason",
+        type: "string (optional)",
+        description: "Present on denied activations (for example revoked, expired, or activation_limit_reached)."
+      }
+    ],
     errorCodes: [
       { status: 400, reason: "Invalid JSON, missing required fields, or invalid metadata." },
       { status: 404, reason: "License key was not found." },
@@ -182,6 +220,24 @@ export const apiEndpoints = {
   "expires_at": "2026-10-20T12:00:00Z",
   "reason": ""
 }`,
+    responseFields: [
+      { name: "valid", type: "boolean", description: "Whether the license is currently valid for the fingerprint." },
+      {
+        name: "status",
+        type: '"inactive" | "active" | "revoked"',
+        description: "License status returned by runtime validation."
+      },
+      {
+        name: "expires_at",
+        type: "string | null",
+        description: "RFC3339 timestamp when the license expires, or null for non-expiring licenses."
+      },
+      {
+        name: "reason",
+        type: "string (optional)",
+        description: "Present on invalid responses (for example revoked, expired, or fingerprint_not_active)."
+      }
+    ],
     errorCodes: [
       { status: 400, reason: "Invalid JSON or missing required fields." },
       { status: 404, reason: "License key was not found." },
@@ -221,6 +277,22 @@ export const apiEndpoints = {
   "max_activations": 3,
   "expires_at": "2026-10-20T12:00:00Z"
 }`,
+    responseFields: [
+      { name: "valid", type: "boolean", description: "Whether the request completed successfully." },
+      { name: "released", type: "boolean", description: "True when a seat was released for the fingerprint." },
+      {
+        name: "status",
+        type: '"inactive" | "active" | "revoked"',
+        description: "License status after deactivation logic is applied."
+      },
+      { name: "active_seats", type: "number", description: "Current number of active seats after this request." },
+      { name: "max_activations", type: "number", description: "Seat limit configured by the license slug policy." },
+      {
+        name: "expires_at",
+        type: "string | null",
+        description: "RFC3339 timestamp when the license expires, or null when the license does not expire."
+      }
+    ],
     errorCodes: [
       { status: 400, reason: "Invalid JSON or missing required fields." },
       { status: 404, reason: "License key was not found." },

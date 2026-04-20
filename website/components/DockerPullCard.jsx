@@ -18,15 +18,17 @@ export default function DockerPullCard() {
   };
 
   return (
-    <div className="command-card">
-      <div className="command">
-        <span className="pill">$</span>
-        <code>{command}</code>
+    <div className="command-shell">
+      <div className="command-card">
+        <div className="command">
+          <span className="pill">$</span>
+          <code>{command}</code>
+        </div>
+        <button type="button" className="command-copy" onClick={onCopy}>
+          <i aria-hidden="true" className={`bx ${copied ? "bx-check" : "bx-copy"}`}></i>
+          <span className="command-copy-label">{copied ? "Copied" : "Copy"}</span>
+        </button>
       </div>
-      <button type="button" className="button button-secondary" onClick={onCopy}>
-        <i aria-hidden="true" className="bx bx-copy"></i>
-        {copied ? "Copied" : "Copy"}
-      </button>
     </div>
   );
 }
