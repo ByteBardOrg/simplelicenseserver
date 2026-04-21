@@ -1,28 +1,40 @@
 name: Build and Test
-
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
-
+    branches: ["main"]
 permissions:
   contents: read
-
 jobs:
-
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: simple_license_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d simple_license_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.26'
-
-    - name: Build
-      run: go build -v ./...
-
-    - name: Test
-      run: go test -v ./...
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build -v ./...
+      - name: Test (unit + existing tests)
+        run: go test -v ./...
+      - name: Test (integration lifecycle flow)
+        env:
+          RUN_INTEGRATION_TESTS: "1"
+          INTEGRATION_DATABASE_URL: postgres://postgres:postgres@localhost:5432/simple_license_test?sslmode=disable
+        run: go test -v ./internal/api -run TestIntegrationLicenseLifecycleFlow
