@@ -14,7 +14,12 @@ export default function SiteLayout({ children }) {
         <div className="container footer-inner">
           <div>
             <div>Simple License Server</div>
-            <small>© 2026 ByteBard (CVR 38774468)</small>
+            <small>
+              © 2026{" "}
+              <a href="https://bytebard.org" target="_blank" rel="noreferrer">
+                ByteBard
+              </a>
+            </small>
           </div>
           <nav className="footer-links" aria-label="Legal">
             <Link href="/privacy/">Privacy</Link>

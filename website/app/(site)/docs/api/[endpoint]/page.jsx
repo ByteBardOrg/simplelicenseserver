@@ -52,6 +52,15 @@ export default async function EndpointPage({ params }) {
             <li key={item}>{item}</li>
           ))}
         </ul>
+        {endpoint.supportedEvents?.length ? (
+          <div className="api-event-badges" aria-label="Supported webhook events">
+            {endpoint.supportedEvents.map((eventName) => (
+              <span className="api-event-badge" key={eventName}>
+                {eventName}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <CodeExample language="bash" code={endpoint.curl} />

@@ -8,7 +8,7 @@ export default function TopHeader() {
         <div className="nav-main">
           <Link href="/" className="brand">
             <span className="brand-mark" aria-hidden="true">
-              <img src="/simplelicenseserver_logo.svg" alt="" />
+              <img src="/icon.svg" alt="" />
             </span>
             <span>Simple License Server</span>
           </Link>
@@ -20,6 +20,14 @@ export default function TopHeader() {
             <Link className="nav-link" href="/docs/api/">
               API
             </Link>
+            <a
+              className="nav-link"
+              href="https://github.com/ByteBardOrg/simplelicenseserver"
+              target="_blank"
+              rel="noreferrer"
+            >
+              GitHub
+            </a>
           </nav>
         </div>
 

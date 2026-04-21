@@ -15,7 +15,7 @@ STRIPE_SECRET_KEY=sk_live_xxx
 STRIPE_WEBHOOK_SECRET=whsec_xxx
 STRIPE_PRICE_ID=price_123
 LICENSE_SERVER_URL=https://licenses.example.com
-LICENSE_SERVER_API_KEY=server_key_xxx`;
+LICENSE_SERVER_SERVER_API_KEY=a94f2c8b5e11d67e8a03c91fd78122e3f6acbb16de2202aa0f814cc2f71d10be`;
 
 const checkoutSessionExample = `import Stripe from "stripe"
 
@@ -52,9 +52,9 @@ export const runtime = "nodejs"
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET
 const licenseServerUrl = process.env.LICENSE_SERVER_URL
-const licenseServerApiKey = process.env.LICENSE_SERVER_API_KEY
+const licenseServerApiKey = process.env.LICENSE_SERVER_SERVER_API_KEY
 
-if (!stripeSecretKey || !stripeWebhookSecret || !licenseServerUrl || !licenseServerApiKey) {
+  if (!stripeSecretKey || !stripeWebhookSecret || !licenseServerUrl || !licenseServerApiKey) {
   throw new Error("Missing one or more required environment variables")
 }
 
@@ -149,7 +149,7 @@ const stripeCliExample = `stripe listen --forward-to localhost:3000/api/webhooks
 stripe trigger checkout.session.completed`;
 
 const generateCurlExample = `curl -sS https://licenses.example.com/generate \\
-  -H "Authorization: Bearer server_key_xxx" \\
+  -H "Authorization: Bearer a94f2c8b5e11d67e8a03c91fd78122e3f6acbb16de2202aa0f814cc2f71d10be" \\
   -H "Idempotency-Key: evt_123" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -208,6 +208,10 @@ export default function StripeGuidePage() {
 
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>1) Set environment variables</h3>
+        <p>
+          <code>LICENSE_SERVER_SERVER_API_KEY</code> should be a generated server key created via
+          <code> POST /management/api-keys</code>.
+        </p>
         <CodeExample language="bash" code={envExample} />
       </div>
 

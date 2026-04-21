@@ -42,8 +42,8 @@ const composeExample = `services:
       # REQUIRED: database connection used by the API service.
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/simple_license_server?sslmode=disable
 
-      # REQUIRED: at least one server key (16+ chars). You can also use SERVER_API_KEY.
-      SERVER_API_KEYS: server_key_dev_123456
+      # REQUIRED: management bootstrap key (16+ chars). You can also use MANAGEMENT_API_KEY.
+      MANAGEMENT_API_KEYS: management_key_dev_123456
 
       # OPTIONAL: API listen port (default: 8080).
       PORT: "8080"
@@ -74,8 +74,13 @@ const startComposeCommand = "docker compose up -d";
 
 const verifyHealthCommand = "curl -sS http://localhost:8080/healthz";
 
+const createServerKeyCommand = `curl -sS http://localhost:8080/management/api-keys \\
+  -H "Authorization: Bearer management_key_dev_123456" \\
+  -H "Content-Type: application/json" \\
+  -d '{"name":"quickstart"}'`;
+
 const generateKeyCommand = `curl -sS http://localhost:8080/generate \\
-  -H "Authorization: Bearer server_key_dev_123456" \\
+  -H "Authorization: Bearer <generated_server_api_key>" \\
   -H "Content-Type: application/json" \\
   -H "Idempotency-Key: evt_quickstart_001" \\
   -d '{"slug":"default","metadata":{"email":"user@example.com","source":"quickstart"}}'`;
@@ -85,10 +90,6 @@ export default function QuickstartPage() {
     <section className="docs-content">
       <p className="eyebrow">Quickstart</p>
       <h1>Run from Docker image in a few minutes</h1>
-      <p>
-        This path uses the published Docker image, then a complete Compose example with every API setting documented as
-        required or optional.
-      </p>
 
       <div className="card" style={{ marginTop: "1rem" }} id="pull-image">
         <h3>1) Pull the image</h3>
@@ -114,8 +115,13 @@ export default function QuickstartPage() {
         <CodeExample language="bash" code={verifyHealthCommand} />
       </div>
 
+      <div className="card" style={{ marginTop: "1rem" }} id="create-server-key">
+        <h3>5) Create your first generated server API key</h3>
+        <CodeExample language="bash" code={createServerKeyCommand} />
+      </div>
+
       <div className="card" style={{ marginTop: "1rem" }} id="generate-first-key">
-        <h3>5) Generate your first key</h3>
+        <h3>6) Generate your first license key</h3>
         <CodeExample language="bash" code={generateKeyCommand} />
       </div>
 

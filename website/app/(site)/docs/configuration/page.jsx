@@ -11,7 +11,7 @@ export const metadata = {
 
 const minimalEnvExample = `# Required
 DATABASE_URL=postgres://postgres:postgres@postgres:5432/simple_license_server?sslmode=disable
-SERVER_API_KEYS=server_key_prod_please_make_this_long_and_random
+MANAGEMENT_API_KEYS=management_key_prod_please_make_this_long_and_random
 
 # Optional
 PORT=8080
@@ -25,16 +25,16 @@ const optionRows = [
     description: "Postgres connection string used by the API at startup."
   },
   {
-    name: "SERVER_API_KEYS",
+    name: "MANAGEMENT_API_KEYS",
     required: "Yes*",
     defaultValue: "None",
-    description: "Comma-separated provisioning keys for /generate and /revoke (each key must be 16+ chars)."
+    description: "Comma-separated management bootstrap keys for /management/* endpoints (each key must be 16+ chars)."
   },
   {
-    name: "SERVER_API_KEY",
+    name: "MANAGEMENT_API_KEY",
     required: "Yes*",
     defaultValue: "None",
-    description: "Single-key fallback used only when SERVER_API_KEYS is not set."
+    description: "Single-key fallback used only when MANAGEMENT_API_KEYS is not set."
   },
   {
     name: "PORT",
@@ -160,8 +160,8 @@ export default function ConfigurationPage() {
       <h1>License server environment options</h1>
       <p>
         This page lists every supported environment variable, what it controls, and its default value.
-        <code> DATABASE_URL</code> and one of <code>SERVER_API_KEYS</code> or <code>SERVER_API_KEY</code> are required
-        to start the server.
+        <code> DATABASE_URL</code> and one of <code>MANAGEMENT_API_KEYS</code> or <code>MANAGEMENT_API_KEY</code> are
+        required to start the server.
       </p>
 
       <div className="card" style={{ marginTop: "1rem" }}>
@@ -177,8 +177,9 @@ export default function ConfigurationPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>Validation notes</h3>
         <ul>
-          <li><code>*</code> One of <code>SERVER_API_KEYS</code> or <code>SERVER_API_KEY</code> must be set.</li>
+          <li><code>*</code> One of <code>MANAGEMENT_API_KEYS</code> or <code>MANAGEMENT_API_KEY</code> must be set.</li>
           <li>All API keys must be at least 16 characters.</li>
+          <li>Use <code>POST /management/api-keys</code> to create generated server API keys for <code>/generate</code> and <code>/revoke</code>.</li>
           <li>All timeout values must be valid Go durations (for example <code>15s</code>, <code>10m</code>).</li>
           <li>When <code>RATE_LIMIT_ENABLED=true</code>, all rate-limit numeric values must be greater than zero.</li>
           <li>Booleans accept values like <code>true/false</code>, <code>1/0</code>, <code>yes/no</code>.</li>

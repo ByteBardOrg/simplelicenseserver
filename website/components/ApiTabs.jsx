@@ -5,8 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import CodeExample from "./CodeExample";
 import { apiEndpointGroups, apiEndpoints, endpointDocHref } from "./apiReferenceData";
 
-export default function ApiTabs({ activeGroup = "provisioning" }) {
-  const group = apiEndpointGroups[activeGroup] ?? apiEndpointGroups.provisioning;
+export default function ApiTabs({ activeGroup = "license" }) {
+  const group = apiEndpointGroups[activeGroup] ?? apiEndpointGroups.license;
   const [activeEndpoint, setActiveEndpoint] = useState(group.endpoints[0]);
 
   useEffect(() => {
@@ -44,6 +44,15 @@ export default function ApiTabs({ activeGroup = "provisioning" }) {
             <li key={item}>{item}</li>
           ))}
         </ul>
+        {currentEndpoint.supportedEvents?.length ? (
+          <div className="api-event-badges" aria-label="Supported webhook events">
+            {currentEndpoint.supportedEvents.map((event) => (
+              <span className="api-event-badge" key={event}>
+                {event}
+              </span>
+            ))}
+          </div>
+        ) : null}
         <p style={{ marginTop: "0.65rem" }}>
           <Link className="api-endpoint-link" href={endpointDocHref(currentEndpoint.key)}>
             Open full endpoint page

@@ -21,6 +21,13 @@ export const docsIndex = [
     keywords: ["concepts", "slug", "seats", "licenses", "activation", "lifecycle"]
   },
   {
+    href: "/docs/concepts/webhooks/",
+    title: "Webhook Concepts",
+    summary: "Delivery model, idempotency headers, and webhook payload contracts.",
+    icon: "bx-broadcast",
+    keywords: ["webhooks", "idempotency", "payload", "events", "concepts"]
+  },
+  {
     href: "/docs/configuration/",
     title: "Configuration",
     summary: "All environment variables, defaults, and validation behavior.",
@@ -36,44 +43,114 @@ export const docsIndex = [
   },
   {
     href: "/docs/api/",
-    title: "API Endpoints",
-    summary: "Provisioning and runtime endpoints with examples.",
+    title: "License API",
+    summary: "License lifecycle endpoints with request/response examples.",
     icon: "bx-code-alt",
-    keywords: ["api", "activate", "validate", "revoke", "deactivate", "generate"]
+    keywords: ["api", "license api", "generate", "activate", "revoke"]
+  },
+  {
+    href: "/docs/management-api/",
+    title: "Management API",
+    summary: "Management endpoints for API keys and webhook configuration.",
+    icon: "bx-wrench",
+    keywords: ["management api", "api keys", "webhooks", "events"]
+  },
+  {
+    href: "/docs/migration/",
+    title: "Migration",
+    summary: "Upgrade guides across released versions.",
+    icon: "bx-transfer",
+    keywords: ["migration", "upgrade", "version"]
+  },
+  {
+    href: "/docs/migration/0-1-0-to-0-2-0/",
+    title: "0.1.0 -> 0.2.0",
+    summary: "Breaking changes and migration checklist for 0.2.0.",
+    icon: "bx-git-compare",
+    keywords: ["0.2.0", "0.1.0", "migration", "breaking changes"]
   },
   {
     href: "/docs/api/generate/",
     title: "POST /generate",
-    summary: "Generate a license from a trusted backend system.",
+    summary: "Generate a license using a generated server API key.",
     icon: "bx-plus-circle",
-    keywords: ["generate", "provisioning", "idempotency"]
+    keywords: ["generate", "license api", "idempotency"]
   },
   {
     href: "/docs/api/revoke/",
     title: "POST /revoke",
     summary: "Revoke an existing license key.",
     icon: "bx-block",
-    keywords: ["revoke", "provisioning"]
+    keywords: ["revoke", "license api"]
   },
   {
     href: "/docs/api/activate/",
     title: "POST /activate",
     summary: "Activate a license for a fingerprint.",
     icon: "bx-plug",
-    keywords: ["activate", "runtime", "fingerprint"]
+    keywords: ["activate", "license api", "fingerprint"]
   },
   {
     href: "/docs/api/validate/",
     title: "POST /validate",
     summary: "Validate runtime license state.",
     icon: "bx-check-shield",
-    keywords: ["validate", "runtime", "status"]
+    keywords: ["validate", "license api", "status"]
   },
   {
     href: "/docs/api/deactivate/",
     title: "POST /deactivate",
     summary: "Release a seat by deactivating one fingerprint.",
     icon: "bx-log-out-circle",
-    keywords: ["deactivate", "runtime", "seats"]
+    keywords: ["deactivate", "license api", "seats"]
+  },
+  {
+    href: "/docs/api/management-api-keys-list/",
+    title: "GET /management/api-keys",
+    summary: "List generated API keys for provisioning.",
+    icon: "bx-list-ul",
+    keywords: ["management api", "api keys", "list"]
+  },
+  {
+    href: "/docs/api/management-api-keys-create/",
+    title: "POST /management/api-keys",
+    summary: "Create a generated server API key.",
+    icon: "bx-key",
+    keywords: ["management api", "api keys", "create"]
+  },
+  {
+    href: "/docs/api/management-api-keys-revoke/",
+    title: "POST /management/api-keys/{id}/revoke",
+    summary: "Revoke a generated API key.",
+    icon: "bx-key-minus",
+    keywords: ["management api", "api keys", "revoke"]
+  },
+  {
+    href: "/docs/api/management-webhooks-list/",
+    title: "GET /management/webhooks",
+    summary: "List configured webhook endpoints.",
+    icon: "bx-link-alt",
+    keywords: ["management api", "webhooks", "list"]
+  },
+  {
+    href: "/docs/api/management-webhooks-create/",
+    title: "POST /management/webhooks",
+    summary: "Create a webhook endpoint configuration.",
+    icon: "bx-plus-circle",
+    keywords: ["management api", "webhooks", "create"]
+  },
+  {
+    href: "/docs/api/management-webhooks-update/",
+    title: "PATCH /management/webhooks/{id}",
+    summary: "Update webhook endpoint configuration.",
+    icon: "bx-edit",
+    keywords: ["management api", "webhooks", "update"]
+  },
+  {
+    href: "/docs/api/management-webhooks-delete/",
+    title: "DELETE /management/webhooks/{id}",
+    summary: "Delete a webhook endpoint.",
+    icon: "bx-trash",
+    keywords: ["management api", "webhooks", "delete"]
   }
 ];

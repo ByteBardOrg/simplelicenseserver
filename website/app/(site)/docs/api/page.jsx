@@ -1,9 +1,10 @@
-import ApiDocsExplorer from "../../../../components/ApiDocsExplorer";
+import Link from "next/link";
+import ApiTabs from "../../../../components/ApiTabs";
 
 export const metadata = {
-  title: "API Endpoints",
+  title: "License API",
   description:
-    "Endpoint guide for Simple License Server covering generate, activate, validate, revoke, and deactivate requests.",
+    "License API endpoint guide for generation, revocation, activation, validation, and deactivation.",
   alternates: {
     canonical: "/docs/api/"
   }
@@ -13,16 +14,19 @@ export default function ApiPage() {
   return (
     <section className="docs-content">
       <p className="eyebrow">API Reference</p>
-      <h1>License lifecycle endpoints</h1>
+      <h1>License API</h1>
       <p>
-        Provisioning endpoints are for trusted backend systems and require a server API key. Runtime endpoints are for
-        your shipped app, using license_key plus fingerprint.
+        These endpoints cover license issuance and runtime lifecycle checks. Use this section for generate, revoke,
+        activate, validate, and deactivate behavior.
       </p>
       <p>
-        Pick a group card, then choose an endpoint tab to see practical behavior notes and an exact curl example.
+        Need operator routes instead? See the dedicated{" "}
+        <Link href="/docs/management-api/">Management API</Link> page.
       </p>
 
-      <ApiDocsExplorer />
+      <div style={{ marginTop: "1rem" }}>
+        <ApiTabs activeGroup="license" />
+      </div>
     </section>
   );
 }

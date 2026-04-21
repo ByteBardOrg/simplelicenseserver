@@ -1,11 +1,14 @@
+import Link from "next/link";
+
 export const metadata = {
   title: "Concepts",
   description:
-    "Core concepts in Simple License Server: slugs, licenses, seats, expiration, and provisioning vs runtime flows.",
+    "Core concepts in Simple License Server: slugs, licenses, seats, expiration, and License API vs Management API flows.",
   alternates: {
     canonical: "/docs/concepts/"
   }
 };
+
 
 const glossaryRows = [
   {
@@ -29,9 +32,14 @@ const glossaryRows = [
       "Device/app-instance identifier sent by your client to activate, validate, and deactivate."
   },
   {
-    term: "Provisioning API",
+    term: "License API",
     meaning:
-      "Trusted backend endpoints (/generate, /revoke) that require a server API key."
+      "License lifecycle endpoints. /generate and /revoke require a generated server API key; runtime routes are called by your app."
+  },
+  {
+    term: "Management API",
+    meaning:
+      "Operator/internal endpoints under /management/* that require a management bootstrap key."
   },
   {
     term: "Runtime API",
@@ -129,18 +137,47 @@ export default function ConceptsPage() {
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
-        <h3>Provisioning vs runtime endpoints</h3>
+        <h3>License API vs Management API</h3>
         <ul>
           <li>
-            <strong>Provisioning</strong>: <code>/generate</code>, <code>/revoke</code> (trusted backend only, server API key
-            required).
+            <strong>License API</strong>: <code>/generate</code>, <code>/revoke</code>, <code>/activate</code>,
+            <code>/validate</code>, <code>/deactivate</code>.
           </li>
           <li>
-            <strong>Runtime</strong>: <code>/activate</code>, <code>/validate</code>, <code>/deactivate</code> (called by your app).
+            <strong>Management API</strong>: <code>/management/api-keys</code> and <code>/management/webhooks</code>
+            routes for operator tooling and frontend-backed workflows.
           </li>
-          <li>Never call provisioning endpoints from browser code.</li>
+          <li>Never call key-protected routes directly from browser code.</li>
           <li>For payment webhooks, use provider event id as <code>Idempotency-Key</code> on <code>/generate</code>.</li>
         </ul>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Outbound webhooks and idempotency</h3>
+        <p>
+          Outbound webhooks are asynchronous delivery jobs. Endpoint configuration lives in Management API, and
+          delivery is triggered by License API events.
+        </p>
+        <ul>
+          <li>
+            Delivery retries can happen, so receivers should dedupe using <code>Idempotency-Key: sls-webhook-&lt;delivery_id&gt;</code>.
+          </li>
+          <li>
+            Additional headers include <code>X-Webhook-Delivery-Id</code> and <code>X-Webhook-Event</code>.
+          </li>
+          <li>
+            Payload shape includes top-level <code>id</code>, <code>type</code>, <code>attempt</code>, <code>occurred_at</code>, and a
+            <code> data</code> object with event-specific fields.
+          </li>
+          <li>
+            Current event types: <code>license.generated</code>, <code>license.activated</code>, <code>license.deactivated</code>,
+            <code> license.validated</code>, <code>license.validation_failed</code>, <code>license.revoked</code>.
+          </li>
+        </ul>
+        <p style={{ marginTop: "0.7rem" }}>
+          For full contract details (headers, envelope, and event payload schemas), see{" "}
+          <Link href="/docs/concepts/webhooks/">Webhook concepts</Link>.
+        </p>
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>

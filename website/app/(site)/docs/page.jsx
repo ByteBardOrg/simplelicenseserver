@@ -16,10 +16,6 @@ export default function DocsHomePage() {
     <section className="docs-content">
       <p className="eyebrow">Documentation</p>
       <h1>Build your license flow with confidence</h1>
-      <p>
-        The docs are split into focused pages so search engines and users can land directly on the topic they need.
-        Each guide is statically generated as its own HTML page for SEO and fast delivery.
-      </p>
 
       <div className="docs-list">
         {docsIndex.map((entry) => (
@@ -35,7 +31,7 @@ export default function DocsHomePage() {
       <CodeExample
         language="bash"
         code={`curl -sS http://localhost:8080/generate \\
-  -H "Authorization: Bearer server_key_dev_123" \\
+  -H "Authorization: Bearer <generated_server_api_key>" \\
   -H "Content-Type: application/json" \\
   -d '{"slug":"default","metadata":{"email":"user@example.com"}}'`}
       />
