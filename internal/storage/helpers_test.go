@@ -15,13 +15,17 @@ func TestGenerateLicenseKeyFormat(t *testing.T) {
 	}
 
 	parts := strings.Split(key, "-")
-	if len(parts) != 4 {
-		t.Fatalf("expected 4 groups, got %d key=%q", len(parts), key)
+	if len(parts) != 5 {
+		t.Fatalf("expected 5 groups, got %d key=%q", len(parts), key)
 	}
 
 	for _, part := range parts {
-		if len(part) != 4 {
-			t.Fatalf("expected 4 chars per group, got %d for %q", len(part), part)
+		if len(part) != 6 {
+			t.Fatalf("expected 6 chars per group, got %d for %q", len(part), part)
+		}
+
+		if _, err := hex.DecodeString(strings.ToLower(part)); err != nil {
+			t.Fatalf("expected hex characters only, got %q", part)
 		}
 	}
 }

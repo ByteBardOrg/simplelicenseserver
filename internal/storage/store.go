@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	licensedomain "simple-license-server/internal/domain/license"
+	slugdomain "simple-license-server/internal/domain/slug"
 )
 
 var (
@@ -144,6 +145,14 @@ type licenseRow struct {
 	MaxActivations int
 }
 
+type slugOptions struct {
+	SlugID         int64
+	ExpirationType string
+	ExpirationDays sql.NullInt32
+	FixedExpiresAt sql.NullTime
+	MaxActivations int
+}
+
 func New(ctx context.Context, databaseURL string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
@@ -151,6 +160,7 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 	}
 
 	store := &Store{db: pool}
+
 	if err := store.Migrate(ctx); err != nil {
 		pool.Close()
 		return nil, err
@@ -266,26 +276,55 @@ func (s *Store) GenerateLicense(ctx context.Context, slugName string, metadata m
 }
 
 func generateLicenseWithQuerier(ctx context.Context, q queryable, slugName string, metadata map[string]any) (GeneratedLicense, error) {
-	var (
-		slugID         int64
-		expirationType string
-		expirationDays sql.NullInt32
-		fixedExpiresAt sql.NullTime
-	)
-
-	err := q.QueryRow(ctx, `
-		SELECT id, expiration_type, expiration_days, fixed_expires_at
-		FROM slugs
-		WHERE name = $1
-	`, slugName).Scan(&slugID, &expirationType, &expirationDays, &fixedExpiresAt)
+	options, err := loadSlugOptionsByName(ctx, q, slugName)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return GeneratedLicense{}, ErrNotFound
-		}
-		return GeneratedLicense{}, fmt.Errorf("lookup slug: %w", err)
+		return GeneratedLicense{}, err
 	}
 
-	expiresAt, err := resolveExpiration(expirationType, expirationDays, fixedExpiresAt)
+	return createLicenseFromSlugOptions(ctx, q, slugName, options, metadata)
+}
+
+func loadSlugOptionsByName(ctx context.Context, q queryable, slugName string) (slugOptions, error) {
+	var options slugOptions
+	err := q.QueryRow(ctx, `
+		SELECT id, expiration_type, expiration_days, fixed_expires_at, max_activations
+		FROM slugs
+		WHERE name = $1
+	`, slugName).Scan(
+		&options.SlugID,
+		&options.ExpirationType,
+		&options.ExpirationDays,
+		&options.FixedExpiresAt,
+		&options.MaxActivations,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return slugOptions{}, ErrNotFound
+		}
+		return slugOptions{}, fmt.Errorf("lookup slug options: %w", err)
+	}
+
+	var expirationDays *int
+	if options.ExpirationDays.Valid {
+		v := int(options.ExpirationDays.Int32)
+		expirationDays = &v
+	}
+
+	var fixedExpiresAt *time.Time
+	if options.FixedExpiresAt.Valid {
+		v := options.FixedExpiresAt.Time.UTC()
+		fixedExpiresAt = &v
+	}
+
+	if _, err := slugdomain.NewPolicy(options.MaxActivations, options.ExpirationType, expirationDays, fixedExpiresAt); err != nil {
+		return slugOptions{}, fmt.Errorf("invalid slug policy in storage: %w", err)
+	}
+
+	return options, nil
+}
+
+func createLicenseFromSlugOptions(ctx context.Context, q queryable, slugName string, options slugOptions, metadata map[string]any) (GeneratedLicense, error) {
+	expiresAt, err := resolveExpiration(options.ExpirationType, options.ExpirationDays, options.FixedExpiresAt)
 	if err != nil {
 		return GeneratedLicense{}, err
 	}
@@ -304,10 +343,10 @@ func generateLicenseWithQuerier(ctx context.Context, q queryable, slugName strin
 		}
 
 		err = q.QueryRow(ctx, `
-			INSERT INTO licenses (key, slug_id, status, metadata, expires_at)
-			VALUES ($1, $2, 'inactive', $3, $4)
+			INSERT INTO licenses (key, slug_id, status, metadata, expires_at, max_activations)
+			VALUES ($1, $2, 'inactive', $3, $4, $5)
 			RETURNING created_at
-		`, licenseKey, slugID, metadataJSON, expiresAt).Scan(&createdAt)
+		`, licenseKey, options.SlugID, metadataJSON, expiresAt, options.MaxActivations).Scan(&createdAt)
 		if err == nil {
 			break
 		}
@@ -1145,12 +1184,12 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 		       l.key,
 		       l.status,
 		       l.expires_at,
+		       l.max_activations,
 		       l.created_at,
 		       l.activated_at,
 		       l.revoked_at,
 		       l.metadata,
-		       s.name,
-		       s.max_activations
+		       s.name
 		FROM licenses l
 		JOIN slugs s ON s.id = l.slug_id
 		WHERE l.key = $1
@@ -1169,12 +1208,12 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 		&row.Key,
 		&row.Status,
 		&row.ExpiresAt,
+		&row.MaxActivations,
 		&row.CreatedAt,
 		&row.ActivatedAt,
 		&row.RevokedAt,
 		&metadataBytes,
 		&row.SlugName,
-		&row.MaxActivations,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1288,20 +1327,22 @@ func isUniqueViolation(err error) bool {
 }
 
 func generateLicenseKey() (string, error) {
-	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	const chars = 16
+	const groupCount = 5
+	const charsPerGroup = 6
+	const keyBytes = (groupCount * charsPerGroup) / 2
 
-	buf := make([]byte, chars)
+	buf := make([]byte, keyBytes)
 	if _, err := rand.Read(buf); err != nil {
 		return "", fmt.Errorf("read random bytes: %w", err)
 	}
 
-	out := make([]byte, 0, chars+3)
-	for i, b := range buf {
-		if i > 0 && i%4 == 0 {
+	raw := strings.ToUpper(hex.EncodeToString(buf))
+	out := make([]byte, 0, len(raw)+(groupCount-1))
+	for i := 0; i < len(raw); i++ {
+		if i > 0 && i%charsPerGroup == 0 {
 			out = append(out, '-')
 		}
-		out = append(out, alphabet[int(b)%len(alphabet)])
+		out = append(out, raw[i])
 	}
 
 	return string(out), nil

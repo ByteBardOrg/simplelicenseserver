@@ -26,7 +26,11 @@ const (
 type License struct {
 	status         Status
 	expiresAt      *time.Time
-	maxActivations int
+	maxActivations MaxActivations
+}
+
+type MaxActivations struct {
+	value int
 }
 
 type RehydrateParams struct {
@@ -65,15 +69,28 @@ func Rehydrate(params RehydrateParams) (*License, error) {
 		return nil, err
 	}
 
-	if params.MaxActivations <= 0 {
-		return nil, fmt.Errorf("max activations must be greater than 0")
+	maxActivations, err := NewMaxActivations(params.MaxActivations)
+	if err != nil {
+		return nil, err
 	}
 
 	return &License{
 		status:         status,
 		expiresAt:      cloneTime(params.ExpiresAt),
-		maxActivations: params.MaxActivations,
+		maxActivations: maxActivations,
 	}, nil
+}
+
+func NewMaxActivations(value int) (MaxActivations, error) {
+	if value <= 0 {
+		return MaxActivations{}, fmt.Errorf("max activations must be greater than 0")
+	}
+
+	return MaxActivations{value: value}, nil
+}
+
+func (m MaxActivations) Int() int {
+	return m.value
 }
 
 func (l *License) Status() Status {
@@ -85,7 +102,7 @@ func (l *License) ExpiresAt() *time.Time {
 }
 
 func (l *License) MaxActivations() int {
-	return l.maxActivations
+	return l.maxActivations.Int()
 }
 
 func (l *License) Activate(now time.Time, activeSeats int, fingerprintAlreadyActive bool) ActivationResult {
@@ -114,7 +131,7 @@ func (l *License) Activate(now time.Time, activeSeats int, fingerprintAlreadyAct
 		}
 	}
 
-	if activeSeats >= l.maxActivations {
+	if activeSeats >= l.maxActivations.Int() {
 		return ActivationResult{Valid: false, Status: l.status, Reason: ReasonActivationLimit}
 	}
 

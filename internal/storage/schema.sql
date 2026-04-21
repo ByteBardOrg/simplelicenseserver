@@ -17,6 +17,20 @@ CREATE TABLE IF NOT EXISTS slugs (
     )
 );
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_slugs_name_format'
+          AND conrelid = 'slugs'::regclass
+    ) THEN
+        ALTER TABLE slugs
+            ADD CONSTRAINT chk_slugs_name_format
+            CHECK (name ~ '^[a-z0-9][a-z0-9-]*$');
+    END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_slugs_default_true ON slugs (is_default) WHERE is_default;
 
 CREATE TABLE IF NOT EXISTS licenses (
@@ -30,6 +44,32 @@ CREATE TABLE IF NOT EXISTS licenses (
     activated_at TIMESTAMPTZ,
     revoked_at TIMESTAMPTZ
 );
+
+ALTER TABLE licenses
+    ADD COLUMN IF NOT EXISTS max_activations INTEGER;
+
+UPDATE licenses l
+SET max_activations = s.max_activations
+FROM slugs s
+WHERE l.slug_id = s.id
+  AND l.max_activations IS NULL;
+
+ALTER TABLE licenses
+    ALTER COLUMN max_activations SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_licenses_max_activations_positive'
+          AND conrelid = 'licenses'::regclass
+    ) THEN
+        ALTER TABLE licenses
+            ADD CONSTRAINT chk_licenses_max_activations_positive
+            CHECK (max_activations > 0);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_licenses_slug_id ON licenses (slug_id);
 

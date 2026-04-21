@@ -57,7 +57,7 @@ func TestProcessDeliverySetsIdempotencyHeader(t *testing.T) {
 		ID:          42,
 		EndpointURL: target.URL,
 		EventType:   "license.generated",
-		Payload:     map[string]any{"license_key": "AAAA-BBBB-CCCC-DDDD"},
+		Payload:     map[string]any{"license_key": "A1B2C3-D4E5F6-AB12CD-34EF56-7890AB"},
 		Attempts:    1,
 		CreatedAt:   time.Now().UTC(),
 	}

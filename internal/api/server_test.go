@@ -25,6 +25,11 @@ type stubService struct {
 	activateLicenseFn          func(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error)
 	validateLicenseFn          func(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error)
 	deactivateLicenseFn        func(ctx context.Context, licenseKey, fingerprint, reason string) (storage.DeactivationResult, error)
+	listSlugsFn                func(ctx context.Context) ([]storage.SlugRecord, error)
+	getSlugByNameFn            func(ctx context.Context, name string) (storage.SlugRecord, error)
+	createSlugFn               func(ctx context.Context, params storage.CreateSlugParams) (storage.SlugRecord, error)
+	updateSlugByNameFn         func(ctx context.Context, name string, params storage.UpdateSlugParams) (storage.SlugRecord, error)
+	deleteSlugByNameFn         func(ctx context.Context, name string) error
 	listAPIKeysFn              func(ctx context.Context) ([]storage.APIKeyRecord, error)
 	createAPIKeyFn             func(ctx context.Context, params storage.CreateAPIKeyParams) (storage.CreatedAPIKey, error)
 	revokeAPIKeyFn             func(ctx context.Context, id int64) (storage.APIKeyRecord, error)
@@ -96,6 +101,41 @@ func (s stubService) DeactivateLicense(ctx context.Context, licenseKey, fingerpr
 		return s.deactivateLicenseFn(ctx, licenseKey, fingerprint, reason)
 	}
 	return storage.DeactivationResult{}, nil
+}
+
+func (s stubService) ListSlugs(ctx context.Context) ([]storage.SlugRecord, error) {
+	if s.listSlugsFn != nil {
+		return s.listSlugsFn(ctx)
+	}
+	return []storage.SlugRecord{}, nil
+}
+
+func (s stubService) GetSlugByName(ctx context.Context, name string) (storage.SlugRecord, error) {
+	if s.getSlugByNameFn != nil {
+		return s.getSlugByNameFn(ctx, name)
+	}
+	return storage.SlugRecord{}, nil
+}
+
+func (s stubService) CreateSlug(ctx context.Context, params storage.CreateSlugParams) (storage.SlugRecord, error) {
+	if s.createSlugFn != nil {
+		return s.createSlugFn(ctx, params)
+	}
+	return storage.SlugRecord{}, nil
+}
+
+func (s stubService) UpdateSlugByName(ctx context.Context, name string, params storage.UpdateSlugParams) (storage.SlugRecord, error) {
+	if s.updateSlugByNameFn != nil {
+		return s.updateSlugByNameFn(ctx, name, params)
+	}
+	return storage.SlugRecord{}, nil
+}
+
+func (s stubService) DeleteSlugByName(ctx context.Context, name string) error {
+	if s.deleteSlugByNameFn != nil {
+		return s.deleteSlugByNameFn(ctx, name)
+	}
+	return nil
 }
 
 func (s stubService) ListAPIKeys(ctx context.Context) ([]storage.APIKeyRecord, error) {
@@ -177,7 +217,7 @@ func TestGenerateWithBearerKey(t *testing.T) {
 			}
 
 			return storage.GeneratedLicense{
-				LicenseKey: "AAAA-BBBB-CCCC-DDDD",
+				LicenseKey: "A1B2C3-D4E5F6-AB12CD-34EF56-7890AB",
 				Slug:       slugName,
 				Status:     "inactive",
 				Metadata:   metadata,

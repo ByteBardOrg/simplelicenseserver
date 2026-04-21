@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	slugdomain "simple-license-server/internal/domain/slug"
 	"simple-license-server/internal/storage"
 	"simple-license-server/internal/version"
 
@@ -118,6 +119,11 @@ type licenseService interface {
 	ActivateLicense(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error)
 	ValidateLicense(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error)
 	DeactivateLicense(ctx context.Context, licenseKey, fingerprint, reason string) (storage.DeactivationResult, error)
+	ListSlugs(ctx context.Context) ([]storage.SlugRecord, error)
+	GetSlugByName(ctx context.Context, name string) (storage.SlugRecord, error)
+	CreateSlug(ctx context.Context, params storage.CreateSlugParams) (storage.SlugRecord, error)
+	UpdateSlugByName(ctx context.Context, name string, params storage.UpdateSlugParams) (storage.SlugRecord, error)
+	DeleteSlugByName(ctx context.Context, name string) error
 	ListAPIKeys(ctx context.Context) ([]storage.APIKeyRecord, error)
 	CreateAPIKey(ctx context.Context, params storage.CreateAPIKeyParams) (storage.CreatedAPIKey, error)
 	RevokeAPIKey(ctx context.Context, id int64) (storage.APIKeyRecord, error)
@@ -189,6 +195,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /activate", s.handleActivate)
 	mux.HandleFunc("POST /validate", s.handleValidate)
 	mux.HandleFunc("POST /deactivate", s.handleDeactivate)
+	mux.Handle("GET /management/slugs", s.requireManagementKey(http.HandlerFunc(s.handleListSlugs)))
+	mux.Handle("POST /management/slugs", s.requireManagementKey(http.HandlerFunc(s.handleCreateSlug)))
+	mux.Handle("GET /management/slugs/{name}", s.requireManagementKey(http.HandlerFunc(s.handleGetSlug)))
+	mux.Handle("PATCH /management/slugs/{name}", s.requireManagementKey(http.HandlerFunc(s.handleUpdateSlug)))
+	mux.Handle("DELETE /management/slugs/{name}", s.requireManagementKey(http.HandlerFunc(s.handleDeleteSlug)))
 	mux.Handle("GET /management/api-keys", s.requireManagementKey(http.HandlerFunc(s.handleListAPIKeys)))
 	mux.Handle("POST /management/api-keys", s.requireManagementKey(http.HandlerFunc(s.handleCreateAPIKey)))
 	mux.Handle("POST /management/api-keys/{id}/revoke", s.requireManagementKey(http.HandlerFunc(s.handleRevokeAPIKey)))
@@ -351,6 +362,10 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateFieldLength(req.Slug, "slug", maxSlugLength); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+	if err := validateSlugName(req.Slug); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
@@ -1188,6 +1203,11 @@ func validateOptionalFieldLength(value, name string, maxLen int) error {
 	}
 
 	return validateFieldLength(trimmed, name, maxLen)
+}
+
+func validateSlugName(value string) error {
+	_, err := slugdomain.ParseName(value)
+	return err
 }
 
 func validateMetadata(metadata map[string]any) error {
