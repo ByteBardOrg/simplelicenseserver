@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { apiEndpointGroups, apiEndpoints, endpointDocHref } from "./apiReferenceData";
 
 const baseLinks = [
@@ -15,6 +16,43 @@ const baseLinks = [
   { href: "/docs/migration/", title: "Migration", icon: "bx-transfer" }
 ];
 
+const conceptsLinks = [
+  { href: "/docs/concepts/slugs/", title: "Slug Concepts" },
+  { href: "/docs/concepts/webhooks/", title: "Webhook Concepts" }
+];
+
+const managementEndpointGroups = [
+  {
+    title: "Slug Endpoints",
+    endpoints: [
+      "management-slugs-list",
+      "management-slugs-create",
+      "management-slugs-get",
+      "management-slugs-update",
+      "management-slugs-delete"
+    ]
+  },
+  {
+    title: "API Key Endpoints",
+    endpoints: [
+      "management-api-keys-list",
+      "management-api-keys-create",
+      "management-api-keys-revoke"
+    ]
+  },
+  {
+    title: "Webhook Endpoints",
+    endpoints: [
+      "management-webhooks-list",
+      "management-webhooks-create",
+      "management-webhooks-update",
+      "management-webhooks-delete"
+    ]
+  }
+];
+
+const migrationLinks = [{ href: "/docs/migration/0-1-0-to-0-2-0/", title: "0.1.0 -> 0.2.0" }];
+
 export default function DocsSidebar() {
   const pathname = usePathname();
   const licenseEndpointKeys = apiEndpointGroups.license.endpoints;
@@ -26,7 +64,45 @@ export default function DocsSidebar() {
   const isLicenseApiSection = pathname === "/docs/api/" || isLicenseEndpointPath;
   const isManagementApiSection = pathname === "/docs/management-api/" || isManagementEndpointPath;
   const isMigrationSection = pathname === "/docs/migration/" || pathname === "/docs/migration/0-1-0-to-0-2-0/";
-  const isConceptsSection = pathname === "/docs/concepts/" || pathname === "/docs/concepts/webhooks/";
+  const isConceptsSection = pathname === "/docs/concepts/" || conceptsLinks.some((entry) => pathname === entry.href);
+
+  const [openSections, setOpenSections] = useState(() => ({
+    "/docs/api/": isLicenseApiSection,
+    "/docs/management-api/": isManagementApiSection,
+    "/docs/concepts/": isConceptsSection,
+    "/docs/migration/": isMigrationSection
+  }));
+
+  useEffect(() => {
+    setOpenSections((previous) => ({
+      ...previous,
+      "/docs/api/": previous["/docs/api/"] || isLicenseApiSection,
+      "/docs/management-api/": previous["/docs/management-api/"] || isManagementApiSection,
+      "/docs/concepts/": previous["/docs/concepts/"] || isConceptsSection,
+      "/docs/migration/": previous["/docs/migration/"] || isMigrationSection
+    }));
+  }, [isLicenseApiSection, isManagementApiSection, isConceptsSection, isMigrationSection]);
+
+  const groupedManagementEndpoints = useMemo(() => {
+    const allowedKeys = new Set(managementEndpointKeys);
+
+    return managementEndpointGroups
+      .map((group) => ({
+        ...group,
+        endpoints: group.endpoints.filter((endpointKey) => allowedKeys.has(endpointKey))
+      }))
+      .filter((group) => group.endpoints.length > 0);
+  }, [managementEndpointKeys]);
+
+  const sectionHasSubnav = (href) =>
+    href === "/docs/api/" || href === "/docs/management-api/" || href === "/docs/concepts/" || href === "/docs/migration/";
+
+  const toggleSection = (href) => {
+    setOpenSections((previous) => ({
+      ...previous,
+      [href]: !previous[href]
+    }));
+  };
 
   return (
     <aside className="docs-sidebar" aria-label="Documentation sections">
@@ -57,13 +133,31 @@ export default function DocsSidebar() {
 
           return (
             <div key={entry.href}>
-              <Link href={entry.href} className={`docs-side-link ${active ? "docs-side-link-active" : ""}`}>
-                <i aria-hidden="true" className={`bx ${entry.icon}`}></i>
-                <span>{entry.title}</span>
-              </Link>
+              <div className="docs-side-link-row">
+                <Link href={entry.href} className={`docs-side-link ${active ? "docs-side-link-active" : ""}`}>
+                  <i aria-hidden="true" className={`bx ${entry.icon}`}></i>
+                  <span>{entry.title}</span>
+                </Link>
 
-              {entry.href === "/docs/api/" ? (
-                <div className="docs-side-subnav">
+                {sectionHasSubnav(entry.href) ? (
+                  <button
+                    type="button"
+                    className="docs-side-toggle"
+                    aria-label={`Toggle ${entry.title} links`}
+                    aria-expanded={openSections[entry.href] ? "true" : "false"}
+                    aria-controls={`docs-subnav-${entry.href.replace(/[^a-z0-9]/gi, "")}`}
+                    onClick={() => toggleSection(entry.href)}
+                  >
+                    <i
+                      aria-hidden="true"
+                      className={`bx ${openSections[entry.href] ? "bx-chevron-down" : "bx-chevron-right"}`}
+                    ></i>
+                  </button>
+                ) : null}
+              </div>
+
+              {entry.href === "/docs/api/" && openSections[entry.href] ? (
+                <div className="docs-side-subnav" id={`docs-subnav-${entry.href.replace(/[^a-z0-9]/gi, "")}`}>
                   {licenseEndpointKeys.map((endpointKey) => {
                     const href = endpointDocHref(endpointKey);
                     const endpoint = apiEndpoints[endpointKey];
@@ -82,56 +176,62 @@ export default function DocsSidebar() {
                 </div>
               ) : null}
 
-              {entry.href === "/docs/management-api/" ? (
-                <div className="docs-side-subnav">
-                  {managementEndpointKeys.map((endpointKey) => {
-                    const href = endpointDocHref(endpointKey);
-                    const endpoint = apiEndpoints[endpointKey];
-                    const endpointActive = pathname === href;
+              {entry.href === "/docs/management-api/" && openSections[entry.href] ? (
+                <div className="docs-side-subnav" id={`docs-subnav-${entry.href.replace(/[^a-z0-9]/gi, "")}`}>
+                  {groupedManagementEndpoints.map((group) => (
+                    <div key={group.title} className="docs-side-subgroup">
+                      <p className="docs-side-subgroup-title">{group.title}</p>
+                      {group.endpoints.map((endpointKey) => {
+                        const href = endpointDocHref(endpointKey);
+                        const endpoint = apiEndpoints[endpointKey];
+                        const endpointActive = pathname === href;
 
-                    return (
-                      <Link
-                        key={endpointKey}
-                        href={href}
-                        className={`docs-side-sublink ${endpointActive ? "docs-side-sublink-active" : ""}`}
-                      >
-                        {endpoint.label}
-                      </Link>
-                    );
-                  })}
+                        return (
+                          <Link
+                            key={endpointKey}
+                            href={href}
+                            className={`docs-side-sublink docs-side-sublink-management ${endpointActive ? "docs-side-sublink-active" : ""}`}
+                          >
+                            {endpoint.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
               ) : null}
 
-              {entry.href === "/docs/concepts/" ? (
-                <div className="docs-side-subnav">
-                  <Link
-                    href="/docs/concepts/webhooks/"
-                    className={`docs-side-sublink ${pathname === "/docs/concepts/webhooks/" ? "docs-side-sublink-active" : ""}`}
-                  >
-                    Webhook Concepts
-                  </Link>
+              {entry.href === "/docs/concepts/" && openSections[entry.href] ? (
+                <div className="docs-side-subnav" id={`docs-subnav-${entry.href.replace(/[^a-z0-9]/gi, "")}`}>
+                  {conceptsLinks.map((concept) => (
+                    <Link
+                      key={concept.href}
+                      href={concept.href}
+                      className={`docs-side-sublink ${pathname === concept.href ? "docs-side-sublink-active" : ""}`}
+                    >
+                      {concept.title}
+                    </Link>
+                  ))}
                 </div>
               ) : null}
 
-              {entry.href === "/docs/migration/" ? (
-                <div className="docs-side-subnav">
-                  <Link
-                    href="/docs/migration/0-1-0-to-0-2-0/"
-                    className={`docs-side-sublink ${pathname === "/docs/migration/0-1-0-to-0-2-0/" ? "docs-side-sublink-active" : ""}`}
-                  >
-                    0.1.0 -&gt; 0.2.0
-                  </Link>
+              {entry.href === "/docs/migration/" && openSections[entry.href] ? (
+                <div className="docs-side-subnav" id={`docs-subnav-${entry.href.replace(/[^a-z0-9]/gi, "")}`}>
+                  {migrationLinks.map((migrationEntry) => (
+                    <Link
+                      key={migrationEntry.href}
+                      href={migrationEntry.href}
+                      className={`docs-side-sublink ${pathname === migrationEntry.href ? "docs-side-sublink-active" : ""}`}
+                    >
+                      {migrationEntry.title}
+                    </Link>
+                  ))}
                 </div>
               ) : null}
             </div>
           );
         })}
       </nav>
-
-      <Link className="docs-sidebar-footer" href="/docs/">
-        <i aria-hidden="true" className="bx bx-book-open"></i>
-        Documentation Home
-      </Link>
     </aside>
   );
 }

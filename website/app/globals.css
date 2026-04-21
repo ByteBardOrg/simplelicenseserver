@@ -688,10 +688,35 @@ a {
   border-radius: var(--radius-lg);
   color: var(--text-muted);
   font-family: "Space Grotesk", sans-serif;
-  font-size: 0.73rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   border: 1px solid transparent;
+}
+
+.docs-side-link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.docs-side-toggle {
+  border: 1px solid rgba(65, 71, 81, 0.5);
+  background: rgba(23, 27, 38, 0.72);
+  color: #aeb8cf;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.docs-side-toggle:hover {
+  color: #eef4ff;
+  border-color: rgba(164, 201, 255, 0.6);
 }
 
 .docs-side-link:hover {
@@ -711,6 +736,25 @@ a {
   margin: 0.2rem 0 0.35rem 1.5rem;
 }
 
+.docs-side-subgroup {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.docs-side-subgroup + .docs-side-subgroup {
+  margin-top: 0.2rem;
+  padding-top: 0.45rem;
+}
+
+.docs-side-subgroup-title {
+  margin: 0;
+  font-family: "Inter", sans-serif;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: #93a2c1;
+}
+
 .docs-side-sublink {
   border-left: 1px solid rgba(65, 71, 81, 0.55);
   padding: 0.28rem 0.45rem;
@@ -718,8 +762,17 @@ a {
   font-size: 0.68rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  font-family: "Space Grotesk", sans-serif;
+  font-family: "Inter", sans-serif;
   line-height: 1.35;
+}
+
+.docs-side-sublink-management {
+  padding-bottom: 0.36rem;
+}
+
+.docs-side-subgroup a.docs-side-sublink-management:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0.28rem;
 }
 
 .docs-side-sublink:hover {

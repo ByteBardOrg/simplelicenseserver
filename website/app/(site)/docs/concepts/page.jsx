@@ -120,6 +120,9 @@ export default function ConceptsPage() {
         <p>
           By default, the server creates a <code>default</code> slug with one seat and no expiration.
         </p>
+        <p style={{ marginTop: "0.7rem" }}>
+          Want a deeper view of naming rules and policy snapshots? See <Link href="/docs/concepts/slugs/">Slug concepts</Link>.
+        </p>
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
@@ -144,8 +147,8 @@ export default function ConceptsPage() {
             <code>/validate</code>, <code>/deactivate</code>.
           </li>
           <li>
-            <strong>Management API</strong>: <code>/management/api-keys</code> and <code>/management/webhooks</code>
-            routes for operator tooling and frontend-backed workflows.
+            <strong>Management API</strong>: <code>/management/slugs</code>, <code>/management/api-keys</code>, and
+            <code> /management/webhooks</code> routes for operator tooling and frontend-backed workflows.
           </li>
           <li>Never call key-protected routes directly from browser code.</li>
           <li>For payment webhooks, use provider event id as <code>Idempotency-Key</code> on <code>/generate</code>.</li>

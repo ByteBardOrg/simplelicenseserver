@@ -28,6 +28,13 @@ export const docsIndex = [
     keywords: ["webhooks", "idempotency", "payload", "events", "concepts"]
   },
   {
+    href: "/docs/concepts/slugs/",
+    title: "Slug Concepts",
+    summary: "Slug naming rules, policy fields, and license snapshot behavior at generation time.",
+    icon: "bx-label",
+    keywords: ["slug", "policies", "max activations", "expiration", "concepts"]
+  },
+  {
     href: "/docs/configuration/",
     title: "Configuration",
     summary: "All environment variables, defaults, and validation behavior.",
