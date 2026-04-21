@@ -4,12 +4,30 @@ https://simplelicenseserver.com
 A simple, postgres-backed license server.
 
 ## Endpoints
+License API:
+
 - `GET /healthz`
-- `POST /generate` (server API key required)
-- `POST /revoke` (server API key required)
+- `POST /generate` (generated server API key required)
+- `POST /revoke` (generated server API key required)
 - `POST /activate`
 - `POST /validate`
 - `POST /deactivate`
+
+Management API:
+
+- `GET /management/slugs`
+- `POST /management/slugs`
+- `GET /management/slugs/{name}`
+- `PATCH /management/slugs/{name}`
+- `DELETE /management/slugs/{name}`
+- `GET /management/api-keys`
+- `POST /management/api-keys`
+- `POST /management/api-keys/{id}/revoke`
+- `GET /management/webhooks`
+- `POST /management/webhooks`
+- `PATCH /management/webhooks/{id}`
+- `DELETE /management/webhooks/{id}`
+
 
 ## Example Compose
 ```yaml
@@ -44,8 +62,8 @@ services:
       # REQUIRED: database connection used by the API service.
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/simple_license_server?sslmode=disable
 
-      # REQUIRED: at least one server key (16+ chars). You can also use SERVER_API_KEY.
-      SERVER_API_KEYS: server_key_dev_123456
+      # REQUIRED: management bootstrap key (16+ chars). You can also use MANAGEMENT_API_KEY.
+      MANAGEMENT_API_KEYS: management_key_dev_123456
 
       # OPTIONAL: API listen port (default: 8080).
       PORT: "8080"
