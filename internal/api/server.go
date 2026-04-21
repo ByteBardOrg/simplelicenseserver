@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,10 +12,16 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"simple-license-server/internal/storage"
+	"simple-license-server/internal/version"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -29,15 +34,52 @@ const (
 	maxMetadataEntries      = 64
 	maxMetadataDepth        = 5
 	maxMetadataNodes        = 512
+	maxAPIKeyNameLength     = 128
+	maxWebhookNameLength    = 128
+	maxWebhookURLLength     = 2048
 	generateEndpointKey     = "/generate"
 )
 
+const (
+	webhookEventLicenseGenerated        = "license.generated"
+	webhookEventLicenseActivated        = "license.activated"
+	webhookEventLicenseDeactivated      = "license.deactivated"
+	webhookEventLicenseValidated        = "license.validated"
+	webhookEventLicenseValidationFailed = "license.validation_failed"
+	webhookEventLicenseRevoked          = "license.revoked"
+)
+
+var supportedWebhookEvents = []string{
+	webhookEventLicenseGenerated,
+	webhookEventLicenseActivated,
+	webhookEventLicenseDeactivated,
+	webhookEventLicenseValidated,
+	webhookEventLicenseValidationFailed,
+	webhookEventLicenseRevoked,
+}
+
+var supportedWebhookEventSet = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(supportedWebhookEvents))
+	for _, event := range supportedWebhookEvents {
+		m[event] = struct{}{}
+	}
+	return m
+}()
+
+var supportedWebhookEventOrder = func() map[string]int {
+	m := make(map[string]int, len(supportedWebhookEvents))
+	for idx, event := range supportedWebhookEvents {
+		m[event] = idx
+	}
+	return m
+}()
+
 type Server struct {
-	service            licenseService
-	logger             *slog.Logger
-	serverAPIKeyHashes [][32]byte
-	requestTimeout     time.Duration
-	rateLimiter        *ipRateLimiter
+	service                licenseService
+	logger                 *slog.Logger
+	managementAPIKeyHashes [][]byte
+	requestTimeout         time.Duration
+	rateLimiter            *ipRateLimiter
 }
 
 type Options struct {
@@ -68,21 +110,30 @@ func DefaultOptions() Options {
 
 type licenseService interface {
 	Ping(ctx context.Context) error
+	EnqueueWebhookEvent(ctx context.Context, eventType string, payload map[string]any) error
+	IsAuthorizedServerAPIKey(ctx context.Context, candidate string) (bool, error)
 	GenerateLicenseIdempotent(ctx context.Context, endpoint, idemKey, requestHash, slugName string, metadata map[string]any) (storage.GeneratedLicense, json.RawMessage, bool, error)
 	GenerateLicense(ctx context.Context, slugName string, metadata map[string]any) (storage.GeneratedLicense, error)
 	RevokeLicense(ctx context.Context, licenseKey string) (storage.RevokeResult, error)
 	ActivateLicense(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error)
 	ValidateLicense(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error)
 	DeactivateLicense(ctx context.Context, licenseKey, fingerprint, reason string) (storage.DeactivationResult, error)
+	ListAPIKeys(ctx context.Context) ([]storage.APIKeyRecord, error)
+	CreateAPIKey(ctx context.Context, params storage.CreateAPIKeyParams) (storage.CreatedAPIKey, error)
+	RevokeAPIKey(ctx context.Context, id int64) (storage.APIKeyRecord, error)
+	ListWebhookEndpoints(ctx context.Context) ([]storage.WebhookEndpoint, error)
+	CreateWebhookEndpoint(ctx context.Context, params storage.CreateWebhookEndpointParams) (storage.WebhookEndpoint, error)
+	UpdateWebhookEndpoint(ctx context.Context, id int64, params storage.UpdateWebhookEndpointParams) (storage.WebhookEndpoint, error)
+	DeleteWebhookEndpoint(ctx context.Context, id int64) error
 }
 
-func NewServer(service licenseService, logger *slog.Logger, serverAPIKeys map[string]struct{}, requestTimeout time.Duration) *Server {
+func NewServer(service licenseService, logger *slog.Logger, managementAPIKeys map[string]struct{}, requestTimeout time.Duration) *Server {
 	opts := DefaultOptions()
 	opts.RequestTimeout = requestTimeout
-	return NewServerWithOptions(service, logger, serverAPIKeys, opts)
+	return NewServerWithOptions(service, logger, managementAPIKeys, opts)
 }
 
-func NewServerWithOptions(service licenseService, logger *slog.Logger, serverAPIKeys map[string]struct{}, opts Options) *Server {
+func NewServerWithOptions(service licenseService, logger *slog.Logger, managementAPIKeys map[string]struct{}, opts Options) *Server {
 	if opts.RequestTimeout <= 0 {
 		opts.RequestTimeout = DefaultOptions().RequestTimeout
 	}
@@ -112,10 +163,10 @@ func NewServerWithOptions(service licenseService, logger *slog.Logger, serverAPI
 	}
 
 	return &Server{
-		service:            service,
-		logger:             logger,
-		serverAPIKeyHashes: hashAPIKeys(serverAPIKeys),
-		requestTimeout:     opts.RequestTimeout,
+		service:                service,
+		logger:                 logger,
+		managementAPIKeyHashes: hashManagementAPIKeys(managementAPIKeys),
+		requestTimeout:         opts.RequestTimeout,
 		rateLimiter: newIPRateLimiter(rateLimiterConfig{
 			enabled:           opts.RateLimitEnabled,
 			globalRPS:         opts.RateLimitGlobalRPS,
@@ -133,11 +184,18 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
-	mux.Handle("POST /generate", s.requireServerKey(http.HandlerFunc(s.handleGenerate)))
-	mux.Handle("POST /revoke", s.requireServerKey(http.HandlerFunc(s.handleRevoke)))
+	mux.Handle("POST /generate", s.requireProvisioningKey(http.HandlerFunc(s.handleGenerate)))
+	mux.Handle("POST /revoke", s.requireProvisioningKey(http.HandlerFunc(s.handleRevoke)))
 	mux.HandleFunc("POST /activate", s.handleActivate)
 	mux.HandleFunc("POST /validate", s.handleValidate)
 	mux.HandleFunc("POST /deactivate", s.handleDeactivate)
+	mux.Handle("GET /management/api-keys", s.requireManagementKey(http.HandlerFunc(s.handleListAPIKeys)))
+	mux.Handle("POST /management/api-keys", s.requireManagementKey(http.HandlerFunc(s.handleCreateAPIKey)))
+	mux.Handle("POST /management/api-keys/{id}/revoke", s.requireManagementKey(http.HandlerFunc(s.handleRevokeAPIKey)))
+	mux.Handle("GET /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleListWebhooks)))
+	mux.Handle("POST /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleCreateWebhook)))
+	mux.Handle("PATCH /management/webhooks/{id}", s.requireManagementKey(http.HandlerFunc(s.handleUpdateWebhook)))
+	mux.Handle("DELETE /management/webhooks/{id}", s.requireManagementKey(http.HandlerFunc(s.handleDeleteWebhook)))
 
 	handler := s.requestTimeoutMiddleware(mux)
 	handler = s.rateLimitMiddleware(handler)
@@ -215,6 +273,57 @@ type deactivateResponse struct {
 	ExpiresAt      *time.Time `json:"expires_at"`
 }
 
+type apiKeyResponse struct {
+	ID        int64      `json:"id"`
+	Name      string     `json:"name"`
+	Hint      string     `json:"hint"`
+	CreatedAt time.Time  `json:"created_at"`
+	RevokedAt *time.Time `json:"revoked_at"`
+}
+
+type listAPIKeysResponse struct {
+	APIKeys []apiKeyResponse `json:"api_keys"`
+}
+
+type createAPIKeyRequest struct {
+	Name string `json:"name"`
+}
+
+type createAPIKeyResponse struct {
+	APIKey    string    `json:"api_key"`
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type webhookEndpointResponse struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	URL       string    `json:"url"`
+	Events    []string  `json:"events"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type listWebhookEndpointsResponse struct {
+	Webhooks []webhookEndpointResponse `json:"webhooks"`
+}
+
+type createWebhookRequest struct {
+	Name    string   `json:"name"`
+	URL     string   `json:"url"`
+	Events  []string `json:"events"`
+	Enabled *bool    `json:"enabled"`
+}
+
+type updateWebhookRequest struct {
+	Name    *string   `json:"name"`
+	URL     *string   `json:"url"`
+	Events  *[]string `json:"events"`
+	Enabled *bool     `json:"enabled"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -226,7 +335,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version.Current})
 }
 
 func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +374,7 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if idempotencyKey != "" {
-		_, responseBody, _, err := s.service.GenerateLicenseIdempotent(
+		generated, responseBody, replayed, err := s.service.GenerateLicenseIdempotent(
 			r.Context(),
 			generateEndpointKey,
 			idempotencyKey,
@@ -285,6 +394,17 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 				s.writeUnexpectedError(w, "failed idempotent license generation", err)
 			}
 			return
+		}
+
+		if !replayed {
+			s.emitWebhookEvent(r.Context(), webhookEventLicenseGenerated, map[string]any{
+				"license_key": generated.LicenseKey,
+				"slug":        generated.Slug,
+				"status":      generated.Status,
+				"metadata":    generated.Metadata,
+				"expires_at":  generated.ExpiresAt,
+				"created_at":  generated.CreatedAt,
+			})
 		}
 
 		writeRawJSON(w, http.StatusOK, responseBody)
@@ -316,6 +436,15 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.emitWebhookEvent(r.Context(), webhookEventLicenseGenerated, map[string]any{
+		"license_key": generated.LicenseKey,
+		"slug":        generated.Slug,
+		"status":      generated.Status,
+		"metadata":    generated.Metadata,
+		"expires_at":  generated.ExpiresAt,
+		"created_at":  generated.CreatedAt,
+	})
+
 	writeRawJSON(w, http.StatusOK, responseBody)
 }
 
@@ -345,6 +474,12 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		s.writeUnexpectedError(w, "failed to revoke license", err)
 		return
 	}
+
+	s.emitWebhookEvent(r.Context(), webhookEventLicenseRevoked, map[string]any{
+		"license_key": revoked.LicenseKey,
+		"status":      revoked.Status,
+		"revoked_at":  revoked.RevokedAt,
+	})
 
 	writeJSON(w, http.StatusOK, revokeResponse{
 		Valid:      revoked.Valid,
@@ -396,6 +531,15 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if result.Valid {
+		s.emitWebhookEvent(r.Context(), webhookEventLicenseActivated, map[string]any{
+			"license_key": result.LicenseKey,
+			"fingerprint": result.Fingerprint,
+			"status":      result.Status,
+			"expires_at":  result.ExpiresAt,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, activateResponse{
 		Valid:       result.Valid,
 		Status:      result.Status,
@@ -440,6 +584,19 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 		s.writeUnexpectedError(w, "failed to validate license", err)
 		return
 	}
+
+	eventType := webhookEventLicenseValidationFailed
+	if result.Valid {
+		eventType = webhookEventLicenseValidated
+	}
+	s.emitWebhookEvent(r.Context(), eventType, map[string]any{
+		"license_key": req.LicenseKey,
+		"fingerprint": req.Fingerprint,
+		"valid":       result.Valid,
+		"status":      result.Status,
+		"expires_at":  result.ExpiresAt,
+		"reason":      result.Reason,
+	})
 
 	writeJSON(w, http.StatusOK, validateResponse{
 		Valid:     result.Valid,
@@ -489,6 +646,17 @@ func (s *Server) handleDeactivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.emitWebhookEvent(r.Context(), webhookEventLicenseDeactivated, map[string]any{
+		"license_key":     req.LicenseKey,
+		"fingerprint":     req.Fingerprint,
+		"reason":          req.Reason,
+		"released":        result.Released,
+		"status":          result.Status,
+		"active_seats":    result.ActiveSeats,
+		"max_activations": result.MaxActivations,
+		"expires_at":      result.ExpiresAt,
+	})
+
 	writeJSON(w, http.StatusOK, deactivateResponse{
 		Valid:          result.Valid,
 		Released:       result.Released,
@@ -499,7 +667,234 @@ func (s *Server) handleDeactivate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) requireServerKey(next http.Handler) http.Handler {
+func (s *Server) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	keys, err := s.service.ListAPIKeys(r.Context())
+	if err != nil {
+		s.writeUnexpectedError(w, "failed to list api keys", err)
+		return
+	}
+
+	response := make([]apiKeyResponse, 0, len(keys))
+	for _, key := range keys {
+		response = append(response, mapAPIKeyResponse(key))
+	}
+
+	writeJSON(w, http.StatusOK, listAPIKeysResponse{APIKeys: response})
+}
+
+func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	var req createAPIKeyRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+
+	if err := validateOptionalFieldLength(req.Name, "name", maxAPIKeyNameLength); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	created, err := s.service.CreateAPIKey(r.Context(), storage.CreateAPIKeyParams{
+		Name:    req.Name,
+		KeyType: "server",
+	})
+	if err != nil {
+		s.writeUnexpectedError(w, "failed to create api key", err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, createAPIKeyResponse{
+		APIKey:    created.APIKey,
+		ID:        created.Record.ID,
+		Name:      created.Record.Name,
+		CreatedAt: created.Record.CreatedAt,
+	})
+}
+
+func (s *Server) handleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	key, err := s.service.RevokeAPIKey(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "api key not found"})
+			return
+		}
+		s.writeUnexpectedError(w, "failed to revoke api key", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, mapAPIKeyResponse(key))
+}
+
+func (s *Server) handleListWebhooks(w http.ResponseWriter, r *http.Request) {
+	endpoints, err := s.service.ListWebhookEndpoints(r.Context())
+	if err != nil {
+		s.writeUnexpectedError(w, "failed to list webhook endpoints", err)
+		return
+	}
+
+	response := make([]webhookEndpointResponse, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		response = append(response, mapWebhookEndpointResponse(endpoint))
+	}
+
+	writeJSON(w, http.StatusOK, listWebhookEndpointsResponse{Webhooks: response})
+}
+
+func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
+	var req createWebhookRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	req.URL = strings.TrimSpace(req.URL)
+	if err := requireFields(
+		requiredField{name: "name", value: req.Name},
+		requiredField{name: "url", value: req.URL},
+	); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+	if err := validateFieldLength(req.Name, "name", maxWebhookNameLength); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+	if err := validateFieldLength(req.URL, "url", maxWebhookURLLength); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+	if err := validateWebhookURL(req.URL); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	events, err := normalizeWebhookEvents(req.Events)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	created, err := s.service.CreateWebhookEndpoint(r.Context(), storage.CreateWebhookEndpointParams{
+		Name:    req.Name,
+		URL:     req.URL,
+		Events:  events,
+		Enabled: enabled,
+	})
+	if err != nil {
+		s.writeUnexpectedError(w, "failed to create webhook endpoint", err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, mapWebhookEndpointResponse(created))
+}
+
+func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	var req updateWebhookRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	if req.Name == nil && req.URL == nil && req.Events == nil && req.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "at least one field must be provided"})
+		return
+	}
+
+	params := storage.UpdateWebhookEndpointParams{Enabled: req.Enabled}
+
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if err := requireField(name, "name"); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		if err := validateFieldLength(name, "name", maxWebhookNameLength); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		params.Name = &name
+	}
+
+	if req.URL != nil {
+		value := strings.TrimSpace(*req.URL)
+		if err := requireField(value, "url"); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		if err := validateFieldLength(value, "url", maxWebhookURLLength); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		if err := validateWebhookURL(value); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		params.URL = &value
+	}
+
+	if req.Events != nil {
+		events, err := normalizeWebhookEvents(*req.Events)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		params.Events = &events
+	}
+
+	updated, err := s.service.UpdateWebhookEndpoint(r.Context(), id, params)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "webhook endpoint not found"})
+			return
+		}
+		s.writeUnexpectedError(w, "failed to update webhook endpoint", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, mapWebhookEndpointResponse(updated))
+}
+
+func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	err = s.service.DeleteWebhookEndpoint(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "webhook endpoint not found"})
+			return
+		}
+		s.writeUnexpectedError(w, "failed to delete webhook endpoint", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func (s *Server) requireProvisioningKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apiKey := extractAPIKey(r)
 		if apiKey == "" {
@@ -507,7 +902,13 @@ func (s *Server) requireServerKey(next http.Handler) http.Handler {
 			return
 		}
 
-		if !s.isAuthorizedServerKey(apiKey) {
+		authorized, err := s.service.IsAuthorizedServerAPIKey(r.Context(), apiKey)
+		if err != nil {
+			s.writeUnexpectedError(w, "failed provisioning api key auth", err)
+			return
+		}
+
+		if !authorized {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "invalid API key"})
 			return
 		}
@@ -516,18 +917,35 @@ func (s *Server) requireServerKey(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) isAuthorizedServerKey(candidate string) bool {
+func (s *Server) requireManagementKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiKey := extractAPIKey(r)
+		if apiKey == "" {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "missing API key"})
+			return
+		}
+
+		if !s.isAuthorizedManagementKey(apiKey) {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "invalid API key"})
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) isAuthorizedManagementKey(candidate string) bool {
 	if strings.TrimSpace(candidate) == "" {
 		return false
 	}
 
-	candidateHash := sha256.Sum256([]byte(candidate))
-	matched := 0
-	for _, keyHash := range s.serverAPIKeyHashes {
-		matched |= subtle.ConstantTimeCompare(candidateHash[:], keyHash[:])
+	for _, keyHash := range s.managementAPIKeyHashes {
+		if err := bcrypt.CompareHashAndPassword(keyHash, []byte(candidate)); err == nil {
+			return true
+		}
 	}
 
-	return matched == 1
+	return false
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
@@ -599,6 +1017,12 @@ func (s *Server) writeUnexpectedError(w http.ResponseWriter, logMsg string, err 
 	default:
 		s.logger.Error(logMsg, "error", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal error"})
+	}
+}
+
+func (s *Server) emitWebhookEvent(ctx context.Context, eventType string, payload map[string]any) {
+	if err := s.service.EnqueueWebhookEvent(ctx, eventType, payload); err != nil {
+		s.logger.Error("failed to enqueue webhook event", "event_type", eventType, "error", err)
 	}
 }
 
@@ -841,10 +1265,98 @@ func validateMetadataValue(value any, depth int, nodes *int) error {
 	}
 }
 
-func hashAPIKeys(keys map[string]struct{}) [][32]byte {
-	hashes := make([][32]byte, 0, len(keys))
+func mapAPIKeyResponse(record storage.APIKeyRecord) apiKeyResponse {
+	return apiKeyResponse{
+		ID:        record.ID,
+		Name:      record.Name,
+		Hint:      record.KeyHint,
+		CreatedAt: record.CreatedAt,
+		RevokedAt: record.RevokedAt,
+	}
+}
+
+func mapWebhookEndpointResponse(endpoint storage.WebhookEndpoint) webhookEndpointResponse {
+	return webhookEndpointResponse{
+		ID:        endpoint.ID,
+		Name:      endpoint.Name,
+		URL:       endpoint.URL,
+		Events:    endpoint.Events,
+		Enabled:   endpoint.Enabled,
+		CreatedAt: endpoint.CreatedAt,
+		UpdatedAt: endpoint.UpdatedAt,
+	}
+}
+
+func parsePathID(raw string) (int64, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, fmt.Errorf("id is required")
+	}
+
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("id must be a positive integer")
+	}
+
+	return id, nil
+}
+
+func normalizeWebhookEvents(events []string) ([]string, error) {
+	if len(events) == 0 {
+		return nil, fmt.Errorf("events must contain at least one event")
+	}
+
+	seen := make(map[string]struct{}, len(events))
+	normalized := make([]string, 0, len(events))
+	for _, raw := range events {
+		event := strings.TrimSpace(raw)
+		if event == "" {
+			return nil, fmt.Errorf("events must not contain empty values")
+		}
+
+		if _, ok := supportedWebhookEventSet[event]; !ok {
+			return nil, fmt.Errorf("unsupported webhook event %q", event)
+		}
+
+		if _, ok := seen[event]; ok {
+			continue
+		}
+		seen[event] = struct{}{}
+		normalized = append(normalized, event)
+	}
+
+	sort.Slice(normalized, func(i, j int) bool {
+		return supportedWebhookEventOrder[normalized[i]] < supportedWebhookEventOrder[normalized[j]]
+	})
+
+	return normalized, nil
+}
+
+func validateWebhookURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("url is invalid")
+	}
+
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("url must use http or https")
+	}
+
+	if strings.TrimSpace(parsed.Host) == "" {
+		return fmt.Errorf("url must include host")
+	}
+
+	return nil
+}
+
+func hashManagementAPIKeys(keys map[string]struct{}) [][]byte {
+	hashes := make([][]byte, 0, len(keys))
 	for key := range keys {
-		hashes = append(hashes, sha256.Sum256([]byte(key)))
+		hashed, err := bcrypt.GenerateFromPassword([]byte(key), bcrypt.DefaultCost+2)
+		if err != nil {
+			panic(fmt.Sprintf("hash management api key: %v", err))
+		}
+		hashes = append(hashes, hashed)
 	}
 
 	return hashes

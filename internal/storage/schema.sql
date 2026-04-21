@@ -59,6 +59,70 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
     PRIMARY KEY (endpoint, idem_key)
 );
 
+CREATE TABLE IF NOT EXISTS api_keys (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    key_type TEXT NOT NULL CHECK (key_type IN ('server')),
+    key_hint TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ
+);
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'api_keys'
+          AND column_name = 'key_prefix'
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'api_keys'
+          AND column_name = 'key_hint'
+    ) THEN
+        ALTER TABLE api_keys RENAME COLUMN key_prefix TO key_hint;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_type_active
+ON api_keys (key_type, created_at DESC)
+WHERE revoked_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    events JSONB NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (jsonb_typeof(events) = 'array')
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_enabled
+ON webhook_endpoints (enabled);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id BIGSERIAL PRIMARY KEY,
+    endpoint_id BIGINT NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'delivered', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error TEXT,
+    last_response_status INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    delivered_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_pending
+ON webhook_deliveries (status, next_attempt_at, id);
+
 ALTER TABLE idempotency_records
     ALTER COLUMN response_body DROP NOT NULL;
 

@@ -1,15 +1,29 @@
-# Simple License Server API (v1 bootstrap)
+# Simple License Server API
 
-This repository now includes a Go API implementation for the v1 licensing flows described in `simple-license-server.md` and `PAYMENT_INTEGRATIONS.md`.
+Current API version: `0.2.0`
+
+This repository contains the Go API implementation for the license and management flows described in `simple-license-server.md`.
 
 ## Implemented endpoints
 
+License API:
+
 - `GET /healthz`
-- `POST /generate` (server API key required)
-- `POST /revoke` (server API key required)
+- `POST /generate` (generated server API key required)
+- `POST /revoke` (generated server API key required)
 - `POST /activate`
 - `POST /validate`
 - `POST /deactivate`
+
+Management API:
+
+- `GET /management/api-keys`
+- `POST /management/api-keys`
+- `POST /management/api-keys/{id}/revoke`
+- `GET /management/webhooks`
+- `POST /management/webhooks`
+- `PATCH /management/webhooks/{id}`
+- `DELETE /management/webhooks/{id}`
 
 `POST /generate` supports idempotency via the `Idempotency-Key` request header.
 
@@ -38,11 +52,20 @@ This starts:
 
 ## Quick smoke test
 
-Generate a key against the default slug:
+1) Create a generated server key with the management key:
+
+```bash
+curl -sS http://localhost:8080/management/api-keys \
+  -H "Authorization: Bearer management_key_dev_123456" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"local-dev"}'
+```
+
+2) Use returned `api_key` against `/generate`:
 
 ```bash
 curl -sS http://localhost:8080/generate \
-  -H "Authorization: Bearer server_key_dev_123" \
+  -H "Authorization: Bearer <generated_server_api_key>" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: evt_123" \
   -d '{"slug":"default","metadata":{"email":"user@example.com"}}'
@@ -50,16 +73,18 @@ curl -sS http://localhost:8080/generate \
 
 ## Authentication
 
-Provisioning routes (`/generate`, `/revoke`) accept either:
+- Management API routes require env bootstrap keys from `MANAGEMENT_API_KEYS` or `MANAGEMENT_API_KEY`.
+- Provisioning routes (`/generate`, `/revoke`) require generated active server API keys from the management API.
+- Runtime routes (`/activate`, `/validate`, `/deactivate`) use `license_key` + `fingerprint` and do not use API keys.
 
-- `Authorization: Bearer <server-key>`
-- `X-API-Key: <server-key>`
+Both key-protected surfaces accept either:
 
-Use `SERVER_API_KEYS` (comma-separated) or `SERVER_API_KEY` for a single key.
+- `Authorization: Bearer <key>`
+- `X-API-Key: <key>`
 
 ## Operational defaults
 
-The API now includes explicit timeout controls for production hardening:
+Timeout controls:
 
 - `REQUEST_TIMEOUT` (default `15s`)
 - `SHUTDOWN_TIMEOUT` (default `10s`)
@@ -80,7 +105,7 @@ Rate limiting defaults:
 
 Additional API security behavior:
 
-- Requires `Content-Type: application/json` for JSON POST endpoints.
+- Requires `Content-Type: application/json` for JSON POST/PATCH endpoints.
 - Applies defensive response headers (`nosniff`, CSP, no-store cache policy).
 - Enforces request field and metadata size limits.
-- Uses constant-time API key hash comparison in auth checks.
+- Stores generated API keys hashed at rest.

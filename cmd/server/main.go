@@ -14,6 +14,8 @@ import (
 	"simple-license-server/internal/api"
 	"simple-license-server/internal/config"
 	"simple-license-server/internal/storage"
+	"simple-license-server/internal/version"
+	"simple-license-server/internal/webhook"
 )
 
 func main() {
@@ -33,7 +35,7 @@ func main() {
 	}
 	defer store.Close()
 
-	server := api.NewServerWithOptions(store, logger, cfg.ServerAPIKeys, api.Options{
+	server := api.NewServerWithOptions(store, logger, cfg.ManagementAPIKeys, api.Options{
 		RequestTimeout:        cfg.RequestTimeout,
 		RateLimitEnabled:      cfg.RateLimitEnabled,
 		RateLimitGlobalRPS:    cfg.RateLimitGlobalRPS,
@@ -44,6 +46,11 @@ func main() {
 		RateLimitMaxIPEntries: cfg.RateLimitMaxIPEntries,
 		TrustProxyHeaders:     cfg.TrustProxyHeaders,
 	})
+
+	dispatcher := webhook.NewDispatcher(store, logger, webhook.DefaultOptions())
+	dispatcherCtx, cancelDispatcher := context.WithCancel(context.Background())
+	defer cancelDispatcher()
+	go dispatcher.Run(dispatcherCtx)
 
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%s", cfg.Port),
@@ -56,7 +63,7 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("license API server started", "addr", httpServer.Addr)
+		logger.Info("license API server started", "addr", httpServer.Addr, "version", version.Current)
 		errCh <- httpServer.ListenAndServe()
 	}()
 
@@ -81,6 +88,8 @@ func main() {
 		logger.Error("http server shutdown failed", "error", err)
 		os.Exit(1)
 	}
+
+	cancelDispatcher()
 
 	logger.Info("http server stopped")
 }

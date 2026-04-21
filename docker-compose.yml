@@ -23,7 +23,7 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/simple_license_server?sslmode=disable
-      SERVER_API_KEYS: server_key_dev_123
+      MANAGEMENT_API_KEYS: management_key_dev_123456
       REQUEST_TIMEOUT: 15s
       SHUTDOWN_TIMEOUT: 10s
       HTTP_READ_TIMEOUT: 15s

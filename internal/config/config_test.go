@@ -26,7 +26,7 @@ func clearOptionalTimeoutEnv(t *testing.T) {
 func TestLoadRequiresDatabaseURL(t *testing.T) {
 	clearOptionalTimeoutEnv(t)
 	t.Setenv("DATABASE_URL", "")
-	t.Setenv("SERVER_API_KEYS", "server_key_dev_123456")
+	t.Setenv("MANAGEMENT_API_KEYS", "management_key_dev_123456")
 
 	_, err := Load()
 	if err == nil {
@@ -41,22 +41,22 @@ func TestLoadRequiresDatabaseURL(t *testing.T) {
 func TestLoadRequiresServerKeys(t *testing.T) {
 	clearOptionalTimeoutEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
-	t.Setenv("SERVER_API_KEYS", "")
-	t.Setenv("SERVER_API_KEY", "")
+	t.Setenv("MANAGEMENT_API_KEYS", "")
+	t.Setenv("MANAGEMENT_API_KEY", "")
 
 	_, err := Load()
 	if err == nil {
 		t.Fatalf("expected error when no server API keys are configured")
 	}
 
-	if !strings.Contains(err.Error(), "SERVER_API_KEYS or SERVER_API_KEY is required") {
+	if !strings.Contains(err.Error(), "MANAGEMENT_API_KEYS or MANAGEMENT_API_KEY is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func TestLoadParsesServerKeysAndTimeouts(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
-	t.Setenv("SERVER_API_KEYS", " server_key_alpha_123, server_key_beta_456 ,server_key_alpha_123 ")
+	t.Setenv("MANAGEMENT_API_KEYS", " management_key_alpha_123, management_key_beta_456 ,management_key_alpha_123 ")
 	t.Setenv("REQUEST_TIMEOUT", "20s")
 	t.Setenv("SHUTDOWN_TIMEOUT", "12s")
 	t.Setenv("HTTP_READ_TIMEOUT", "13s")
@@ -76,14 +76,14 @@ func TestLoadParsesServerKeysAndTimeouts(t *testing.T) {
 		t.Fatalf("load config: %v", err)
 	}
 
-	if _, ok := cfg.ServerAPIKeys["server_key_alpha_123"]; !ok {
-		t.Fatalf("expected key server_key_alpha_123 in parsed key set")
+	if _, ok := cfg.ManagementAPIKeys["management_key_alpha_123"]; !ok {
+		t.Fatalf("expected key management_key_alpha_123 in parsed key set")
 	}
-	if _, ok := cfg.ServerAPIKeys["server_key_beta_456"]; !ok {
-		t.Fatalf("expected key server_key_beta_456 in parsed key set")
+	if _, ok := cfg.ManagementAPIKeys["management_key_beta_456"]; !ok {
+		t.Fatalf("expected key management_key_beta_456 in parsed key set")
 	}
-	if len(cfg.ServerAPIKeys) != 2 {
-		t.Fatalf("expected deduplicated key set of size 2, got %d", len(cfg.ServerAPIKeys))
+	if len(cfg.ManagementAPIKeys) != 2 {
+		t.Fatalf("expected deduplicated key set of size 2, got %d", len(cfg.ManagementAPIKeys))
 	}
 
 	if cfg.RequestTimeout != 20*time.Second {
@@ -131,7 +131,7 @@ func TestLoadParsesServerKeysAndTimeouts(t *testing.T) {
 func TestLoadRejectsInvalidTimeout(t *testing.T) {
 	clearOptionalTimeoutEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
-	t.Setenv("SERVER_API_KEYS", "server_key_dev_123456")
+	t.Setenv("MANAGEMENT_API_KEYS", "management_key_dev_123456")
 	t.Setenv("REQUEST_TIMEOUT", "not-a-duration")
 
 	_, err := Load()
@@ -147,7 +147,7 @@ func TestLoadRejectsInvalidTimeout(t *testing.T) {
 func TestLoadRejectsShortAPIKey(t *testing.T) {
 	clearOptionalTimeoutEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
-	t.Setenv("SERVER_API_KEYS", "short_key")
+	t.Setenv("MANAGEMENT_API_KEYS", "short_key")
 
 	_, err := Load()
 	if err == nil {
