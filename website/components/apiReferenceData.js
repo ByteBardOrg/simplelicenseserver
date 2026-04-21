@@ -21,10 +21,15 @@ export const apiEndpointGroups = {
     key: "management",
     title: "Management API",
     summary:
-      "Operator-facing routes for API key lifecycle and webhook endpoint configuration.",
+      "Operator-facing routes for slug policy management, API key lifecycle, and webhook endpoint configuration.",
     description:
-      "Use these endpoints from internal tooling or your frontend backend. Management routes require the management bootstrap key configured via MANAGEMENT_API_KEYS or MANAGEMENT_API_KEY.",
+      "Use these endpoints from internal tooling or your frontend backend to manage slug policy templates, provisioning API keys, and webhook endpoint configuration. Management routes require the management bootstrap key configured via MANAGEMENT_API_KEYS or MANAGEMENT_API_KEY.",
     endpoints: [
+      "management-slugs-list",
+      "management-slugs-create",
+      "management-slugs-get",
+      "management-slugs-update",
+      "management-slugs-delete",
       "management-api-keys-list",
       "management-api-keys-create",
       "management-api-keys-revoke",
@@ -71,7 +76,7 @@ export const apiEndpoints = {
   }
 }`,
     responseBody: `{
-  "license_key": "XXXX-XXXX-XXXX-XXXX",
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
   "slug": "my-product",
   "status": "inactive",
   "metadata": {
@@ -119,15 +124,15 @@ export const apiEndpoints = {
   -H "Authorization: Bearer <generated_server_api_key>" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "license_key": "XXXX-XXXX-XXXX-XXXX"
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
   }'`,
     requestBody: `{
-  "license_key": "XXXX-XXXX-XXXX-XXXX"
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
 }`,
     responseBody: `{
   "valid": false,
   "status": "revoked",
-  "license_key": "XXXX-XXXX-XXXX-XXXX",
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
   "revoked_at": "2026-04-20T12:00:00Z"
 }`,
     responseFields: [
@@ -159,7 +164,7 @@ export const apiEndpoints = {
     curl: `curl -X POST http://localhost:8080/activate \\
   -H "Content-Type: application/json" \\
   -d '{
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "fingerprint": "abc123-machine-fingerprint",
     "metadata": {
       "email": "user@example.com",
@@ -167,7 +172,7 @@ export const apiEndpoints = {
     }
   }'`,
     requestBody: `{
-  "license_key": "XXXX-XXXX-XXXX-XXXX",
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
   "fingerprint": "abc123-machine-fingerprint",
   "metadata": {
     "email": "user@example.com",
@@ -177,7 +182,7 @@ export const apiEndpoints = {
     responseBody: `{
   "valid": true,
   "status": "active",
-  "license_key": "XXXX-XXXX-XXXX-XXXX",
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
   "fingerprint": "abc123-machine-fingerprint",
   "expires_at": "2026-10-20T12:00:00Z",
   "reason": ""
@@ -224,11 +229,11 @@ export const apiEndpoints = {
     curl: `curl -X POST http://localhost:8080/validate \\
   -H "Content-Type: application/json" \\
   -d '{
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "fingerprint": "abc123-machine-fingerprint"
   }'`,
     requestBody: `{
-  "license_key": "XXXX-XXXX-XXXX-XXXX",
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
   "fingerprint": "abc123-machine-fingerprint"
 }`,
     responseBody: `{
@@ -277,12 +282,12 @@ export const apiEndpoints = {
     curl: `curl -X POST http://localhost:8080/deactivate \\
   -H "Content-Type: application/json" \\
   -d '{
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "fingerprint": "abc123-machine-fingerprint",
     "reason": "user_device_replaced"
   }'`,
     requestBody: `{
-  "license_key": "XXXX-XXXX-XXXX-XXXX",
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
   "fingerprint": "abc123-machine-fingerprint",
   "reason": "user_device_replaced"
 }`,
@@ -313,6 +318,221 @@ export const apiEndpoints = {
     errorCodes: [
       { status: 400, reason: "Invalid JSON or missing required fields." },
       { status: 404, reason: "License not found." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-slugs-list": {
+    key: "management-slugs-list",
+    group: "management",
+    label: "GET /management/slugs",
+    method: "GET",
+    path: "/management/slugs",
+    title: "List Slugs",
+    summary: "List configured slug policy templates used during license generation.",
+    details: [
+      "Requires management API key auth.",
+      "Returns slug records including expiration policy and default slug flag.",
+      "Slug policies affect newly generated licenses and are snapshotted at issuance time."
+    ],
+    curl: `curl -sS http://localhost:8080/management/slugs \\
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `{
+  "slugs": [
+    {
+      "id": 1,
+      "name": "default",
+      "max_activations": 1,
+      "expiration_type": "forever",
+      "expiration_days": null,
+      "fixed_expires_at": null,
+      "is_default": true,
+      "created_at": "2026-04-21T09:00:00Z",
+      "updated_at": "2026-04-21T09:00:00Z"
+    }
+  ]
+}`,
+    responseFields: [
+      { name: "slugs", type: "array", description: "Slug policy records available for generation." }
+    ],
+    errorCodes: [
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-slugs-create": {
+    key: "management-slugs-create",
+    group: "management",
+    label: "POST /management/slugs",
+    method: "POST",
+    path: "/management/slugs",
+    title: "Create Slug",
+    summary: "Create a new slug policy template for future license generation.",
+    details: [
+      "Requires management API key auth.",
+      "Slug names must be lowercase URL-safe (a-z, 0-9, hyphen).",
+      "Expiration policy must be one of forever, duration, or fixed_date."
+    ],
+    curl: `curl -sS http://localhost:8080/management/slugs \\
+  -H "Authorization: Bearer management_key_dev_123456" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "name": "pro-monthly",
+    "max_activations": 3,
+    "expiration_type": "duration",
+    "expiration_days": 30
+  }'`,
+    requestBody: `{
+  "name": "pro-monthly",
+  "max_activations": 3,
+  "expiration_type": "duration",
+  "expiration_days": 30
+}`,
+    responseBody: `{
+  "id": 2,
+  "name": "pro-monthly",
+  "max_activations": 3,
+  "expiration_type": "duration",
+  "expiration_days": 30,
+  "fixed_expires_at": null,
+  "is_default": false,
+  "created_at": "2026-04-21T12:00:00Z",
+  "updated_at": "2026-04-21T12:00:00Z"
+}`,
+    responseFields: [
+      { name: "id", type: "number", description: "Stable internal slug id." },
+      { name: "name", type: "string", description: "Lowercase URL-safe slug key used by /generate." },
+      { name: "max_activations", type: "number", description: "Per-license seat limit for newly generated licenses." },
+      { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Expiration policy mode." },
+      { name: "expiration_days", type: "number | null", description: "Required when expiration_type is duration." },
+      { name: "fixed_expires_at", type: "string | null", description: "RFC3339 timestamp required when expiration_type is fixed_date." },
+      { name: "is_default", type: "boolean", description: "True only for the default slug." },
+      { name: "created_at", type: "string", description: "RFC3339 creation timestamp." },
+      { name: "updated_at", type: "string", description: "RFC3339 update timestamp." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid JSON, invalid slug name, or invalid expiration policy fields." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 409, reason: "Slug name already exists." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-slugs-get": {
+    key: "management-slugs-get",
+    group: "management",
+    label: "GET /management/slugs/{name}",
+    method: "GET",
+    path: "/management/slugs/{name}",
+    title: "Get Slug",
+    summary: "Fetch one slug policy template by slug name.",
+    details: [
+      "Requires management API key auth.",
+      "Path slug name must be lowercase URL-safe.",
+      "Useful for edit forms and operator diagnostics."
+    ],
+    curl: `curl -sS http://localhost:8080/management/slugs/pro-monthly \\
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `{
+  "id": 2,
+  "name": "pro-monthly",
+  "max_activations": 3,
+  "expiration_type": "duration",
+  "expiration_days": 30,
+  "fixed_expires_at": null,
+  "is_default": false,
+  "created_at": "2026-04-21T12:00:00Z",
+  "updated_at": "2026-04-21T12:00:00Z"
+}`,
+    responseFields: [
+      { name: "name", type: "string", description: "Slug key used by generation calls." },
+      { name: "max_activations", type: "number", description: "Seat limit configured on this slug template." },
+      { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Expiration policy mode." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid slug name format in path." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 404, reason: "Slug not found." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-slugs-update": {
+    key: "management-slugs-update",
+    group: "management",
+    label: "PATCH /management/slugs/{name}",
+    method: "PATCH",
+    path: "/management/slugs/{name}",
+    title: "Update Slug",
+    summary: "Update one or more slug policy fields by slug name.",
+    details: [
+      "Requires management API key auth.",
+      "At least one field must be provided.",
+      "Changing a slug only affects newly generated licenses. Existing licenses keep snapshotted policy values."
+    ],
+    curl: `curl -sS -X PATCH http://localhost:8080/management/slugs/pro-monthly \\
+  -H "Authorization: Bearer management_key_dev_123456" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "max_activations": 5,
+    "expiration_type": "fixed_date",
+    "fixed_expires_at": "2027-01-01T00:00:00Z"
+  }'`,
+    requestBody: `{
+  "max_activations": 5,
+  "expiration_type": "fixed_date",
+  "fixed_expires_at": "2027-01-01T00:00:00Z"
+}`,
+    responseBody: `{
+  "id": 2,
+  "name": "pro-monthly",
+  "max_activations": 5,
+  "expiration_type": "fixed_date",
+  "expiration_days": null,
+  "fixed_expires_at": "2027-01-01T00:00:00Z",
+  "is_default": false,
+  "created_at": "2026-04-21T12:00:00Z",
+  "updated_at": "2026-04-21T12:30:00Z"
+}`,
+    responseFields: [
+      { name: "updated_at", type: "string", description: "RFC3339 timestamp after update." },
+      { name: "max_activations", type: "number", description: "Updated seat limit for future generations." },
+      { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Updated expiration policy mode." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid path slug, invalid body, missing patch fields, or invalid expiration policy values." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 404, reason: "Slug not found." },
+      { status: 409, reason: "Slug name already exists." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-slugs-delete": {
+    key: "management-slugs-delete",
+    group: "management",
+    label: "DELETE /management/slugs/{name}",
+    method: "DELETE",
+    path: "/management/slugs/{name}",
+    title: "Delete Slug",
+    summary: "Delete a slug policy template when it is safe to remove.",
+    details: [
+      "Requires management API key auth.",
+      "Default slug cannot be deleted.",
+      "Slugs with existing licenses cannot be deleted."
+    ],
+    curl: `curl -sS -X DELETE http://localhost:8080/management/slugs/legacy-beta \\
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `{
+  "deleted": true
+}`,
+    responseFields: [
+      { name: "deleted", type: "boolean", description: "True when deletion succeeds." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid slug name format in path." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 404, reason: "Slug not found." },
+      { status: 409, reason: "Slug cannot be deleted (default or in-use)." },
       { status: 500, reason: "Unexpected server or storage error." }
     ]
   },
@@ -595,6 +815,11 @@ export const apiEndpointOrder = [
   "activate",
   "validate",
   "deactivate",
+  "management-slugs-list",
+  "management-slugs-create",
+  "management-slugs-get",
+  "management-slugs-update",
+  "management-slugs-delete",
   "management-api-keys-list",
   "management-api-keys-create",
   "management-api-keys-revoke",

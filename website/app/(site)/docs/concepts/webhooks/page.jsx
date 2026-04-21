@@ -16,7 +16,7 @@ const webhookEnvelopeExample = `{
   "attempt": 1,
   "occurred_at": "2026-04-21T12:00:00Z",
   "data": {
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "slug": "default",
     "status": "inactive",
     "metadata": {
@@ -31,7 +31,7 @@ const webhookContractExamples = {
   generated: `{
   "type": "license.generated",
   "data": {
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "slug": "default",
     "status": "inactive",
     "metadata": { "email": "user@example.com" },
@@ -42,7 +42,7 @@ const webhookContractExamples = {
   activated: `{
   "type": "license.activated",
   "data": {
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "fingerprint": "abc123-machine-fingerprint",
     "status": "active",
     "expires_at": "2026-10-20T12:00:00Z"
@@ -51,7 +51,7 @@ const webhookContractExamples = {
   deactivated: `{
   "type": "license.deactivated",
   "data": {
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "fingerprint": "abc123-machine-fingerprint",
     "reason": "user_device_replaced",
     "released": true,
@@ -64,7 +64,7 @@ const webhookContractExamples = {
   validated: `{
   "type": "license.validated",
   "data": {
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "fingerprint": "abc123-machine-fingerprint",
     "valid": true,
     "status": "active",
@@ -75,7 +75,7 @@ const webhookContractExamples = {
   validationFailed: `{
   "type": "license.validation_failed",
   "data": {
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "fingerprint": "abc123-machine-fingerprint",
     "valid": false,
     "status": "inactive",
@@ -86,7 +86,7 @@ const webhookContractExamples = {
   revoked: `{
   "type": "license.revoked",
   "data": {
-    "license_key": "XXXX-XXXX-XXXX-XXXX",
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
     "status": "revoked",
     "revoked_at": "2026-04-21T12:10:00Z"
   }

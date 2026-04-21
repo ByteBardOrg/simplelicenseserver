@@ -5,7 +5,7 @@ import { codeLanguageClass, highlightCode } from "../../components/codeHighlight
 const homeApiExample = `curl -X POST http://localhost:8080/activate \\
   -H "Content-Type: application/json" \\
   -d '{
-    "license_key": "ABCD-1234-EFGH-5678",
+    "license_key": "C1B6DE-39A6E3-DE1529-8559A0-4AF593",
     "fingerprint": "machine-uuid-9876",
     "metadata": {
       "os": "linux",

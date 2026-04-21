@@ -51,9 +51,44 @@ export const docsIndex = [
   {
     href: "/docs/management-api/",
     title: "Management API",
-    summary: "Management endpoints for API keys and webhook configuration.",
+    summary: "Management endpoints for slugs, API keys, and webhook configuration.",
     icon: "bx-wrench",
-    keywords: ["management api", "api keys", "webhooks", "events"]
+    keywords: ["management api", "slugs", "api keys", "webhooks", "events"]
+  },
+  {
+    href: "/docs/api/management-slugs-list/",
+    title: "GET /management/slugs",
+    summary: "List slug policy templates.",
+    icon: "bx-list-ul",
+    keywords: ["management api", "slugs", "list"]
+  },
+  {
+    href: "/docs/api/management-slugs-create/",
+    title: "POST /management/slugs",
+    summary: "Create a slug policy template.",
+    icon: "bx-plus-circle",
+    keywords: ["management api", "slugs", "create"]
+  },
+  {
+    href: "/docs/api/management-slugs-get/",
+    title: "GET /management/slugs/{name}",
+    summary: "Get a slug policy template by name.",
+    icon: "bx-search-alt",
+    keywords: ["management api", "slugs", "get"]
+  },
+  {
+    href: "/docs/api/management-slugs-update/",
+    title: "PATCH /management/slugs/{name}",
+    summary: "Update a slug policy template.",
+    icon: "bx-edit",
+    keywords: ["management api", "slugs", "update"]
+  },
+  {
+    href: "/docs/api/management-slugs-delete/",
+    title: "DELETE /management/slugs/{name}",
+    summary: "Delete a slug policy template.",
+    icon: "bx-trash",
+    keywords: ["management api", "slugs", "delete"]
   },
   {
     href: "/docs/migration/",
