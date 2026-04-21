@@ -17,6 +17,11 @@ License API:
 
 Management API:
 
+- `GET /management/slugs`
+- `POST /management/slugs`
+- `GET /management/slugs/{name}`
+- `PATCH /management/slugs/{name}`
+- `DELETE /management/slugs/{name}`
 - `GET /management/api-keys`
 - `POST /management/api-keys`
 - `POST /management/api-keys/{id}/revoke`
