@@ -11,7 +11,7 @@ import (
 type Config struct {
 	Port                  string
 	DatabaseURL           string
-	ServerAPIKeys         map[string]struct{}
+	ManagementAPIKeys     map[string]struct{}
 	RequestTimeout        time.Duration
 	ShutdownTimeout       time.Duration
 	ReadTimeout           time.Duration
@@ -50,18 +50,18 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
 	}
 
-	keys := strings.TrimSpace(os.Getenv("SERVER_API_KEYS"))
+	keys := strings.TrimSpace(os.Getenv("MANAGEMENT_API_KEYS"))
 	if keys == "" {
-		if single := strings.TrimSpace(os.Getenv("SERVER_API_KEY")); single != "" {
+		if single := strings.TrimSpace(os.Getenv("MANAGEMENT_API_KEY")); single != "" {
 			keys = single
 		}
 	}
 
 	if keys == "" {
-		return Config{}, fmt.Errorf("SERVER_API_KEYS or SERVER_API_KEY is required")
+		return Config{}, fmt.Errorf("MANAGEMENT_API_KEYS or MANAGEMENT_API_KEY is required")
 	}
 
-	cfg.ServerAPIKeys = make(map[string]struct{})
+	cfg.ManagementAPIKeys = make(map[string]struct{})
 	for _, raw := range strings.Split(keys, ",") {
 		key := strings.TrimSpace(raw)
 		if key == "" {
@@ -69,14 +69,14 @@ func Load() (Config, error) {
 		}
 
 		if len(key) < 16 {
-			return Config{}, fmt.Errorf("server API keys must be at least 16 characters")
+			return Config{}, fmt.Errorf("management API keys must be at least 16 characters")
 		}
 
-		cfg.ServerAPIKeys[key] = struct{}{}
+		cfg.ManagementAPIKeys[key] = struct{}{}
 	}
 
-	if len(cfg.ServerAPIKeys) == 0 {
-		return Config{}, fmt.Errorf("no valid API keys found in SERVER_API_KEYS")
+	if len(cfg.ManagementAPIKeys) == 0 {
+		return Config{}, fmt.Errorf("no valid API keys found in MANAGEMENT_API_KEYS")
 	}
 
 	var err error

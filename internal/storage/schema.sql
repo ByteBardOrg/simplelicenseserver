@@ -17,6 +17,20 @@ CREATE TABLE IF NOT EXISTS slugs (
     )
 );
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_slugs_name_format'
+          AND conrelid = 'slugs'::regclass
+    ) THEN
+        ALTER TABLE slugs
+            ADD CONSTRAINT chk_slugs_name_format
+            CHECK (name ~ '^[a-z0-9][a-z0-9-]*$');
+    END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_slugs_default_true ON slugs (is_default) WHERE is_default;
 
 CREATE TABLE IF NOT EXISTS licenses (
@@ -30,6 +44,32 @@ CREATE TABLE IF NOT EXISTS licenses (
     activated_at TIMESTAMPTZ,
     revoked_at TIMESTAMPTZ
 );
+
+ALTER TABLE licenses
+    ADD COLUMN IF NOT EXISTS max_activations INTEGER;
+
+UPDATE licenses l
+SET max_activations = s.max_activations
+FROM slugs s
+WHERE l.slug_id = s.id
+  AND l.max_activations IS NULL;
+
+ALTER TABLE licenses
+    ALTER COLUMN max_activations SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_licenses_max_activations_positive'
+          AND conrelid = 'licenses'::regclass
+    ) THEN
+        ALTER TABLE licenses
+            ADD CONSTRAINT chk_licenses_max_activations_positive
+            CHECK (max_activations > 0);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_licenses_slug_id ON licenses (slug_id);
 
@@ -58,6 +98,70 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (endpoint, idem_key)
 );
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    key_type TEXT NOT NULL CHECK (key_type IN ('server')),
+    key_hint TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ
+);
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'api_keys'
+          AND column_name = 'key_prefix'
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'api_keys'
+          AND column_name = 'key_hint'
+    ) THEN
+        ALTER TABLE api_keys RENAME COLUMN key_prefix TO key_hint;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_type_active
+ON api_keys (key_type, created_at DESC)
+WHERE revoked_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    events JSONB NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (jsonb_typeof(events) = 'array')
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_enabled
+ON webhook_endpoints (enabled);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id BIGSERIAL PRIMARY KEY,
+    endpoint_id BIGINT NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'delivered', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error TEXT,
+    last_response_status INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    delivered_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_pending
+ON webhook_deliveries (status, next_attempt_at, id);
 
 ALTER TABLE idempotency_records
     ALTER COLUMN response_body DROP NOT NULL;

@@ -16,13 +16,42 @@ import (
 )
 
 type stubService struct {
-	pingFn               func(ctx context.Context) error
-	generateLicenseFn    func(ctx context.Context, slugName string, metadata map[string]any) (storage.GeneratedLicense, error)
-	generateIdempotentFn func(ctx context.Context, endpoint, idemKey, requestHash, slugName string, metadata map[string]any) (storage.GeneratedLicense, json.RawMessage, bool, error)
-	revokeLicenseFn      func(ctx context.Context, licenseKey string) (storage.RevokeResult, error)
-	activateLicenseFn    func(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error)
-	validateLicenseFn    func(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error)
-	deactivateLicenseFn  func(ctx context.Context, licenseKey, fingerprint, reason string) (storage.DeactivationResult, error)
+	enqueueWebhookEventFn      func(ctx context.Context, eventType string, payload map[string]any) error
+	isAuthorizedServerAPIKeyFn func(ctx context.Context, candidate string) (bool, error)
+	pingFn                     func(ctx context.Context) error
+	generateLicenseFn          func(ctx context.Context, slugName string, metadata map[string]any) (storage.GeneratedLicense, error)
+	generateIdempotentFn       func(ctx context.Context, endpoint, idemKey, requestHash, slugName string, metadata map[string]any) (storage.GeneratedLicense, json.RawMessage, bool, error)
+	revokeLicenseFn            func(ctx context.Context, licenseKey string) (storage.RevokeResult, error)
+	activateLicenseFn          func(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error)
+	validateLicenseFn          func(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error)
+	deactivateLicenseFn        func(ctx context.Context, licenseKey, fingerprint, reason string) (storage.DeactivationResult, error)
+	listSlugsFn                func(ctx context.Context) ([]storage.SlugRecord, error)
+	getSlugByNameFn            func(ctx context.Context, name string) (storage.SlugRecord, error)
+	createSlugFn               func(ctx context.Context, params storage.CreateSlugParams) (storage.SlugRecord, error)
+	updateSlugByNameFn         func(ctx context.Context, name string, params storage.UpdateSlugParams) (storage.SlugRecord, error)
+	deleteSlugByNameFn         func(ctx context.Context, name string) error
+	listAPIKeysFn              func(ctx context.Context) ([]storage.APIKeyRecord, error)
+	createAPIKeyFn             func(ctx context.Context, params storage.CreateAPIKeyParams) (storage.CreatedAPIKey, error)
+	revokeAPIKeyFn             func(ctx context.Context, id int64) (storage.APIKeyRecord, error)
+	listWebhooksFn             func(ctx context.Context) ([]storage.WebhookEndpoint, error)
+	createWebhookFn            func(ctx context.Context, params storage.CreateWebhookEndpointParams) (storage.WebhookEndpoint, error)
+	updateWebhookFn            func(ctx context.Context, id int64, params storage.UpdateWebhookEndpointParams) (storage.WebhookEndpoint, error)
+	deleteWebhookFn            func(ctx context.Context, id int64) error
+}
+
+func (s stubService) EnqueueWebhookEvent(ctx context.Context, eventType string, payload map[string]any) error {
+	if s.enqueueWebhookEventFn != nil {
+		return s.enqueueWebhookEventFn(ctx, eventType, payload)
+	}
+
+	return nil
+}
+
+func (s stubService) IsAuthorizedServerAPIKey(ctx context.Context, candidate string) (bool, error) {
+	if s.isAuthorizedServerAPIKeyFn != nil {
+		return s.isAuthorizedServerAPIKeyFn(ctx, candidate)
+	}
+	return false, nil
 }
 
 func (s stubService) Ping(ctx context.Context) error {
@@ -74,6 +103,90 @@ func (s stubService) DeactivateLicense(ctx context.Context, licenseKey, fingerpr
 	return storage.DeactivationResult{}, nil
 }
 
+func (s stubService) ListSlugs(ctx context.Context) ([]storage.SlugRecord, error) {
+	if s.listSlugsFn != nil {
+		return s.listSlugsFn(ctx)
+	}
+	return []storage.SlugRecord{}, nil
+}
+
+func (s stubService) GetSlugByName(ctx context.Context, name string) (storage.SlugRecord, error) {
+	if s.getSlugByNameFn != nil {
+		return s.getSlugByNameFn(ctx, name)
+	}
+	return storage.SlugRecord{}, nil
+}
+
+func (s stubService) CreateSlug(ctx context.Context, params storage.CreateSlugParams) (storage.SlugRecord, error) {
+	if s.createSlugFn != nil {
+		return s.createSlugFn(ctx, params)
+	}
+	return storage.SlugRecord{}, nil
+}
+
+func (s stubService) UpdateSlugByName(ctx context.Context, name string, params storage.UpdateSlugParams) (storage.SlugRecord, error) {
+	if s.updateSlugByNameFn != nil {
+		return s.updateSlugByNameFn(ctx, name, params)
+	}
+	return storage.SlugRecord{}, nil
+}
+
+func (s stubService) DeleteSlugByName(ctx context.Context, name string) error {
+	if s.deleteSlugByNameFn != nil {
+		return s.deleteSlugByNameFn(ctx, name)
+	}
+	return nil
+}
+
+func (s stubService) ListAPIKeys(ctx context.Context) ([]storage.APIKeyRecord, error) {
+	if s.listAPIKeysFn != nil {
+		return s.listAPIKeysFn(ctx)
+	}
+	return []storage.APIKeyRecord{}, nil
+}
+
+func (s stubService) CreateAPIKey(ctx context.Context, params storage.CreateAPIKeyParams) (storage.CreatedAPIKey, error) {
+	if s.createAPIKeyFn != nil {
+		return s.createAPIKeyFn(ctx, params)
+	}
+	return storage.CreatedAPIKey{}, nil
+}
+
+func (s stubService) RevokeAPIKey(ctx context.Context, id int64) (storage.APIKeyRecord, error) {
+	if s.revokeAPIKeyFn != nil {
+		return s.revokeAPIKeyFn(ctx, id)
+	}
+	return storage.APIKeyRecord{}, nil
+}
+
+func (s stubService) ListWebhookEndpoints(ctx context.Context) ([]storage.WebhookEndpoint, error) {
+	if s.listWebhooksFn != nil {
+		return s.listWebhooksFn(ctx)
+	}
+	return []storage.WebhookEndpoint{}, nil
+}
+
+func (s stubService) CreateWebhookEndpoint(ctx context.Context, params storage.CreateWebhookEndpointParams) (storage.WebhookEndpoint, error) {
+	if s.createWebhookFn != nil {
+		return s.createWebhookFn(ctx, params)
+	}
+	return storage.WebhookEndpoint{}, nil
+}
+
+func (s stubService) UpdateWebhookEndpoint(ctx context.Context, id int64, params storage.UpdateWebhookEndpointParams) (storage.WebhookEndpoint, error) {
+	if s.updateWebhookFn != nil {
+		return s.updateWebhookFn(ctx, id, params)
+	}
+	return storage.WebhookEndpoint{}, nil
+}
+
+func (s stubService) DeleteWebhookEndpoint(ctx context.Context, id int64) error {
+	if s.deleteWebhookFn != nil {
+		return s.deleteWebhookFn(ctx, id)
+	}
+	return nil
+}
+
 func TestGenerateRequiresServerKey(t *testing.T) {
 	s := NewServer(stubService{}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"server_key_dev_123": {}}, 15*time.Second)
 
@@ -94,6 +207,9 @@ func TestGenerateWithBearerKey(t *testing.T) {
 	createdAt := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
 
 	s := NewServer(stubService{
+		isAuthorizedServerAPIKeyFn: func(ctx context.Context, candidate string) (bool, error) {
+			return candidate == "server_key_dev_123", nil
+		},
 		generateLicenseFn: func(ctx context.Context, slugName string, metadata map[string]any) (storage.GeneratedLicense, error) {
 			called = true
 			if _, ok := ctx.Deadline(); ok {
@@ -101,7 +217,7 @@ func TestGenerateWithBearerKey(t *testing.T) {
 			}
 
 			return storage.GeneratedLicense{
-				LicenseKey: "AAAA-BBBB-CCCC-DDDD",
+				LicenseKey: "A1B2C3-D4E5F6-AB12CD-34EF56-7890AB",
 				Slug:       slugName,
 				Status:     "inactive",
 				Metadata:   metadata,
@@ -128,6 +244,79 @@ func TestGenerateWithBearerKey(t *testing.T) {
 
 	if !deadlineSeen {
 		t.Fatalf("expected request timeout middleware to set context deadline")
+	}
+}
+
+func TestGenerateRejectsManagementKeyForProvisioning(t *testing.T) {
+	s := NewServer(stubService{
+		isAuthorizedServerAPIKeyFn: func(ctx context.Context, candidate string) (bool, error) {
+			return candidate == "server_key_db_123456", nil
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
+
+	req := httptest.NewRequest(http.MethodPost, "/generate", strings.NewReader(`{"slug":"default"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer management_key_dev_123456")
+	rr := httptest.NewRecorder()
+
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestManagementEndpointRequiresManagementKey(t *testing.T) {
+	s := NewServer(stubService{}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
+
+	req := httptest.NewRequest(http.MethodGet, "/management/api-keys", nil)
+	rr := httptest.NewRecorder()
+
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rr.Code)
+	}
+}
+
+func TestManagementEndpointWithManagementKey(t *testing.T) {
+	s := NewServer(stubService{}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
+
+	req := httptest.NewRequest(http.MethodGet, "/management/api-keys", nil)
+	req.Header.Set("Authorization", "Bearer management_key_dev_123456")
+	rr := httptest.NewRecorder()
+
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if !strings.Contains(rr.Body.String(), "api_keys") {
+		t.Fatalf("expected api keys payload, got %s", rr.Body.String())
+	}
+}
+
+func TestManagementEndpointRejectsProvisioningKey(t *testing.T) {
+	s := NewServer(
+		stubService{
+			isAuthorizedServerAPIKeyFn: func(ctx context.Context, candidate string) (bool, error) {
+				return candidate == "server_key_db_123456", nil
+			},
+		},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		map[string]struct{}{"management_key_dev_123456": {}},
+		15*time.Second,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/management/api-keys", nil)
+	req.Header.Set("Authorization", "Bearer server_key_db_123456")
+	rr := httptest.NewRecorder()
+
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
