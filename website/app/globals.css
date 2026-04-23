@@ -16,6 +16,10 @@
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
   --radius-control: var(--radius-md);
+  --docs-scrollbar-size: 0.62rem;
+  --docs-scrollbar-track: rgba(10, 14, 24, 0.66);
+  --docs-scrollbar-thumb: linear-gradient(180deg, rgba(164, 201, 255, 0.52), rgba(96, 165, 250, 0.44));
+  --docs-scrollbar-thumb-hover: linear-gradient(180deg, rgba(164, 201, 255, 0.7), rgba(96, 165, 250, 0.58));
 }
 
 * {
@@ -628,15 +632,47 @@ a {
   min-width: 0;
 }
 
+.docs-sidebar,
+.docs-table-wrap {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(164, 201, 255, 0.58) rgba(10, 14, 24, 0.66);
+}
+
+.docs-sidebar::-webkit-scrollbar,
+.docs-table-wrap::-webkit-scrollbar {
+  width: var(--docs-scrollbar-size);
+  height: var(--docs-scrollbar-size);
+}
+
+.docs-sidebar::-webkit-scrollbar-track,
+.docs-table-wrap::-webkit-scrollbar-track {
+  background: var(--docs-scrollbar-track);
+  border-radius: 999px;
+}
+
+.docs-sidebar::-webkit-scrollbar-thumb,
+.docs-table-wrap::-webkit-scrollbar-thumb {
+  background: var(--docs-scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid rgba(10, 14, 24, 0.7);
+}
+
+.docs-sidebar::-webkit-scrollbar-thumb:hover,
+.docs-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--docs-scrollbar-thumb-hover);
+}
+
 .docs-sidebar {
   position: sticky;
   top: 85px;
   align-self: start;
   max-height: calc(100vh - 102px);
   overflow-y: auto;
+  scrollbar-gutter: stable;
   border: 1px solid rgba(65, 71, 81, 0.45);
   border-radius: var(--radius-lg);
   padding: 0.85rem;
+  padding-inline-end: 1.25rem;
   background: rgba(23, 27, 38, 0.9);
 }
 
@@ -820,8 +856,11 @@ a {
 .docs-table-wrap {
   margin-top: 0.75rem;
   overflow-x: auto;
+  scrollbar-gutter: stable;
   border: 1px solid rgba(65, 71, 81, 0.45);
   border-radius: var(--radius-lg);
+  padding-bottom: 0.45rem;
+  background: rgba(10, 14, 24, 0.72);
 }
 
 .docs-table {
@@ -1343,6 +1382,8 @@ a {
     position: static;
     max-height: none;
     overflow: visible;
+    padding-inline-end: 0.85rem;
+    scrollbar-gutter: auto;
   }
 }
 
