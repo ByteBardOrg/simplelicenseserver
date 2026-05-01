@@ -14,6 +14,13 @@ export const docsIndex = [
     keywords: ["docker", "compose", "setup", "install"]
   },
   {
+    href: "/docs/authentication/",
+    title: "Authentication",
+    summary: "Understand management keys vs generated server API keys.",
+    icon: "bx-lock-alt",
+    keywords: ["authentication", "bearer", "api key", "management", "authorization"]
+  },
+  {
     href: "/docs/concepts/",
     title: "Concepts",
     summary: "Understand slugs, seats, activation flow, and license lifecycle behavior.",
