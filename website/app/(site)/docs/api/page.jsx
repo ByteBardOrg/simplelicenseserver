@@ -14,6 +14,7 @@ export default function ApiPage() {
   const licenseRows = apiEndpointGroups.license.endpoints.map((endpointKey) => apiEndpoints[endpointKey]);
 
   const managementRows = [
+    apiEndpoints["management-licenses-list"],
     apiEndpoints["management-slugs-list"],
     apiEndpoints["management-api-keys-list"],
     apiEndpoints["management-webhooks-list"]

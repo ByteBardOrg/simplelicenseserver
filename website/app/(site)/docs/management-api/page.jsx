@@ -13,6 +13,10 @@ export const metadata = {
 export default function ManagementApiPage() {
   const managementConceptSections = [
     {
+      title: "License Management",
+      endpointKeys: ["management-licenses-list"]
+    },
+    {
       title: "Slug Management",
       endpointKeys: [
         "management-slugs-list",
@@ -44,8 +48,8 @@ export default function ManagementApiPage() {
       <p className="eyebrow">API Reference</p>
       <h1>Management API</h1>
       <p>
-        These routes are for internal tooling: slug policies, generated server API keys, and webhook endpoint
-        configuration.
+        These routes are for internal tooling: license inspection, slug policies, generated server API keys, and webhook
+        endpoint configuration. License generation and revocation stay on <code>/generate</code> and <code>/revoke</code>.
       </p>
 
       {managementConceptSections.map((section) => {

@@ -21,10 +21,11 @@ export const apiEndpointGroups = {
     key: "management",
     title: "Management API",
     summary:
-      "Operator-facing routes for slug policy management, API key lifecycle, and webhook endpoint configuration.",
+      "Operator-facing routes for license inspection, slug policy management, API key lifecycle, and webhook endpoint configuration.",
     description:
-      "Use these endpoints from internal tooling or your frontend backend to manage slug policy templates, provisioning API keys, and webhook endpoint configuration. Management routes require the management bootstrap key configured via MANAGEMENT_API_KEYS or MANAGEMENT_API_KEY.",
+      "Use these endpoints from internal tooling or your frontend backend to inspect licenses, manage slug policy templates, provisioning API keys, and webhook endpoint configuration. Management routes require the management bootstrap key configured via MANAGEMENT_API_KEYS or MANAGEMENT_API_KEY.",
     endpoints: [
+      "management-licenses-list",
       "management-slugs-list",
       "management-slugs-create",
       "management-slugs-get",
@@ -318,6 +319,80 @@ export const apiEndpoints = {
     errorCodes: [
       { status: 400, reason: "Invalid JSON or missing required fields." },
       { status: 404, reason: "License not found." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-licenses-list": {
+    key: "management-licenses-list",
+    group: "management",
+    label: "GET /management/licenses",
+    method: "GET",
+    path: "/management/licenses",
+    title: "List Licenses",
+    summary: "List issued licenses with pagination, search, status filtering, and aggregate status counts.",
+    details: [
+      "Requires management API key auth.",
+      "Supports optional query parameters: page, page_size, q, and status.",
+      "page defaults to 1; page_size defaults to 10 and is capped at 100.",
+      "status may be inactive, active, revoked, or expired.",
+      "q searches license key, slug name, and metadata text; max length is 256 characters.",
+      "active_seats is derived from active activation rows at request time."
+    ],
+    curl: `curl -sS "http://localhost:8080/management/licenses?page=1&page_size=10&q=user@example.com&status=active" \
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body; use optional query parameters page, page_size, q, and status)`,
+    responseBody: `{
+  "licenses": [
+    {
+      "id": "2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01",
+      "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
+      "slug": "pro-monthly",
+      "status": "active",
+      "metadata": {
+        "email": "user@example.com",
+        "external_customer_id": "cus_123"
+      },
+      "max_activations": 3,
+      "active_seats": 1,
+      "expires_at": "2026-10-20T12:00:00Z",
+      "created_at": "2026-04-20T12:00:00Z",
+      "activated_at": "2026-04-21T09:30:00Z",
+      "revoked_at": null
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 10,
+    "total": 1,
+    "total_pages": 1
+  },
+  "counts": {
+    "total": 1,
+    "active": 1,
+    "inactive": 0,
+    "revoked": 0,
+    "expired": 0
+  }
+}`,
+    responseFields: [
+      { name: "licenses", type: "array", description: "Page of issued license records." },
+      { name: "licenses[].id", type: "string", description: "Stable internal license id." },
+      { name: "licenses[].license_key", type: "string", description: "Issued license key." },
+      { name: "licenses[].slug", type: "string", description: "Slug used when the license was generated." },
+      { name: "licenses[].status", type: '"inactive" | "active" | "revoked" | "expired"', description: "Display status. Expired is derived from expires_at for non-revoked licenses." },
+      { name: "licenses[].metadata", type: "object", description: "Metadata stored on the license." },
+      { name: "licenses[].max_activations", type: "number", description: "Seat limit snapshotted from the slug at generation time." },
+      { name: "licenses[].active_seats", type: "number", description: "Current active activation count." },
+      { name: "licenses[].expires_at", type: "string | null", description: "RFC3339 expiration timestamp, or null when the license does not expire." },
+      { name: "licenses[].created_at", type: "string", description: "RFC3339 creation timestamp." },
+      { name: "licenses[].activated_at", type: "string | null", description: "RFC3339 timestamp when the license first became active." },
+      { name: "licenses[].revoked_at", type: "string | null", description: "RFC3339 timestamp when the license was revoked." },
+      { name: "pagination", type: "object", description: "Current page, page_size, total result count, and total_pages." },
+      { name: "counts", type: "object", description: "Aggregate counts for total, active, inactive, revoked, and expired licenses." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid page, page_size, search length, or status filter." },
+      { status: 401, reason: "Missing or invalid management API key." },
       { status: 500, reason: "Unexpected server or storage error." }
     ]
   },
@@ -815,6 +890,7 @@ export const apiEndpointOrder = [
   "activate",
   "validate",
   "deactivate",
+  "management-licenses-list",
   "management-slugs-list",
   "management-slugs-create",
   "management-slugs-get",

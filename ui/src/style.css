@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  background: #0f131d;
+  color: #dfe2f1;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.metadata-label {
+  font-family: "Space Grotesk", Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ghost-border {
+  border: 1px solid rgba(65, 71, 81, 0.15);
+}
+
+.surface-card {
+  background: #1c1f2a;
+}
+
+.surface-low {
+  background: #171b26;
+}
+
+.code-block {
+  background: #0b1320;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.field-control {
+  width: 100%;
+  border-radius: 0.375rem;
+  background: #1c1f2a;
+  color: #dfe2f1;
+  outline: 1px solid rgba(65, 71, 81, 0.18);
+  padding: 0.75rem 1rem;
+  transition: outline-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.field-control::placeholder {
+  color: #6f7a91;
+}
+
+.field-control:focus {
+  background: #262a35;
+  outline-color: rgba(164, 201, 255, 0.5);
+  box-shadow: 0 0 0 4px rgba(164, 201, 255, 0.08);
+}
+
+.field-control-with-icon {
+  padding-left: 2.25rem;
+}
+
+.primary-action {
+  border-radius: 0.375rem;
+  background: #a4c9ff;
+  color: #06142c;
+  font-weight: 800;
+  transition: background-color 0.15s ease;
+}
+
+.primary-action:hover {
+  background: #60a5fa;
+}
+
+.secondary-action {
+  border-radius: 0.375rem;
+  background: #1c1f2a;
+  color: #dfe2f1;
+  font-weight: 700;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.secondary-action:hover {
+  background: #262a35;
+}
+
+.sortable-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: #8f98ad;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  transition: color 0.15s ease;
+}
+
+.sortable-header:hover {
+  color: #dfe2f1;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #414751;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #5b6472;
+}

@@ -37,6 +37,7 @@ func main() {
 
 	server := api.NewServerWithOptions(store, logger, cfg.ManagementAPIKeys, api.Options{
 		RequestTimeout:        cfg.RequestTimeout,
+		UIEnabled:             cfg.UIEnabled,
 		RateLimitEnabled:      cfg.RateLimitEnabled,
 		RateLimitGlobalRPS:    cfg.RateLimitGlobalRPS,
 		RateLimitGlobalBurst:  cfg.RateLimitGlobalBurst,

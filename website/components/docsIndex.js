@@ -65,9 +65,16 @@ export const docsIndex = [
   {
     href: "/docs/management-api/",
     title: "Management API",
-    summary: "Management endpoints for slugs, API keys, and webhook configuration.",
+    summary: "Management endpoints for license listing, slugs, API keys, and webhook configuration.",
     icon: "bx-wrench",
     keywords: ["management api", "slugs", "api keys", "webhooks", "events"]
+  },
+  {
+    href: "/docs/api/management-licenses-list/",
+    title: "GET /management/licenses",
+    summary: "List issued licenses with search and pagination.",
+    icon: "bx-list-ul",
+    keywords: ["management api", "licenses", "list", "search"]
   },
   {
     href: "/docs/api/management-slugs-list/",

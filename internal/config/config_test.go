@@ -21,6 +21,7 @@ func clearOptionalTimeoutEnv(t *testing.T) {
 	t.Setenv("RATE_LIMIT_IP_TTL", "")
 	t.Setenv("RATE_LIMIT_MAX_IP_ENTRIES", "")
 	t.Setenv("TRUST_PROXY_HEADERS", "")
+	t.Setenv("UI_ENABLED", "")
 }
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
@@ -70,6 +71,7 @@ func TestLoadParsesServerKeysAndTimeouts(t *testing.T) {
 	t.Setenv("RATE_LIMIT_IP_TTL", "11m")
 	t.Setenv("RATE_LIMIT_MAX_IP_ENTRIES", "15000")
 	t.Setenv("TRUST_PROXY_HEADERS", "true")
+	t.Setenv("UI_ENABLED", "true")
 
 	cfg, err := Load()
 	if err != nil {
@@ -125,6 +127,9 @@ func TestLoadParsesServerKeysAndTimeouts(t *testing.T) {
 	}
 	if !cfg.TrustProxyHeaders {
 		t.Fatalf("expected trust proxy headers enabled")
+	}
+	if !cfg.UIEnabled {
+		t.Fatalf("expected ui enabled")
 	}
 }
 

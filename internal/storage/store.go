@@ -48,6 +48,27 @@ type GeneratedLicense struct {
 	CreatedAt  time.Time
 }
 
+type LicenseListParams struct {
+	Page     int
+	PageSize int
+	Search   string
+	Status   string
+}
+
+type LicenseStatusCounts struct {
+	Total    int
+	Active   int
+	Inactive int
+	Revoked  int
+	Expired  int
+}
+
+type LicenseListResult struct {
+	Licenses []LicenseRow
+	Total    int
+	Counts   LicenseStatusCounts
+}
+
 type RevokeResult struct {
 	Valid      bool
 	Status     string
@@ -132,7 +153,7 @@ type WebhookDelivery struct {
 	CreatedAt   time.Time
 }
 
-type licenseRow struct {
+type LicenseRow struct {
 	ID             string
 	Key            string
 	Status         string
@@ -143,6 +164,7 @@ type licenseRow struct {
 	Metadata       map[string]any
 	SlugName       string
 	MaxActivations int
+	ActiveSeats    int
 }
 
 type slugOptions struct {
@@ -1178,7 +1200,7 @@ func (s *Store) getWebhookEndpointByID(ctx context.Context, id int64) (WebhookEn
 	return endpoint, nil
 }
 
-func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool) (licenseRow, error) {
+func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool) (LicenseRow, error) {
 	query := `
 		SELECT l.id,
 		       l.key,
@@ -1200,7 +1222,7 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 
 	var (
 		metadataBytes []byte
-		row           licenseRow
+		row           LicenseRow
 	)
 
 	err := tx.QueryRow(ctx, query, key).Scan(
@@ -1217,9 +1239,9 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return licenseRow{}, ErrNotFound
+			return LicenseRow{}, ErrNotFound
 		}
-		return licenseRow{}, fmt.Errorf("query license by key: %w", err)
+		return LicenseRow{}, fmt.Errorf("query license by key: %w", err)
 	}
 
 	if len(metadataBytes) == 0 {
@@ -1228,7 +1250,7 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 	}
 
 	if err := json.Unmarshal(metadataBytes, &row.Metadata); err != nil {
-		return licenseRow{}, fmt.Errorf("decode metadata json: %w", err)
+		return LicenseRow{}, fmt.Errorf("decode metadata json: %w", err)
 	}
 
 	return row, nil

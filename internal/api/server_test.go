@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +23,7 @@ type stubService struct {
 	pingFn                     func(ctx context.Context) error
 	generateLicenseFn          func(ctx context.Context, slugName string, metadata map[string]any) (storage.GeneratedLicense, error)
 	generateIdempotentFn       func(ctx context.Context, endpoint, idemKey, requestHash, slugName string, metadata map[string]any) (storage.GeneratedLicense, json.RawMessage, bool, error)
+	listLicensesFn             func(ctx context.Context, params storage.LicenseListParams) (storage.LicenseListResult, error)
 	revokeLicenseFn            func(ctx context.Context, licenseKey string) (storage.RevokeResult, error)
 	activateLicenseFn          func(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error)
 	validateLicenseFn          func(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error)
@@ -73,6 +76,13 @@ func (s stubService) GenerateLicense(ctx context.Context, slugName string, metad
 		return s.generateLicenseFn(ctx, slugName, metadata)
 	}
 	return storage.GeneratedLicense{}, nil
+}
+
+func (s stubService) ListLicenses(ctx context.Context, params storage.LicenseListParams) (storage.LicenseListResult, error) {
+	if s.listLicensesFn != nil {
+		return s.listLicensesFn(ctx, params)
+	}
+	return storage.LicenseListResult{}, nil
 }
 
 func (s stubService) RevokeLicense(ctx context.Context, licenseKey string) (storage.RevokeResult, error) {
@@ -247,22 +257,70 @@ func TestGenerateWithBearerKey(t *testing.T) {
 	}
 }
 
-func TestGenerateRejectsManagementKeyForProvisioning(t *testing.T) {
+func TestGenerateAcceptsManagementKeyForProvisioning(t *testing.T) {
+	createdAt := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
+	called := false
 	s := NewServer(stubService{
 		isAuthorizedServerAPIKeyFn: func(ctx context.Context, candidate string) (bool, error) {
 			return candidate == "server_key_db_123456", nil
 		},
+		generateLicenseFn: func(ctx context.Context, slugName string, metadata map[string]any) (storage.GeneratedLicense, error) {
+			called = true
+			return storage.GeneratedLicense{
+				LicenseKey: "LNC-8821-X99B-4421",
+				Slug:       slugName,
+				Status:     "inactive",
+				Metadata:   metadata,
+				CreatedAt:  createdAt,
+			}, nil
+		},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
 
-	req := httptest.NewRequest(http.MethodPost, "/generate", strings.NewReader(`{"slug":"default"}`))
+	req := httptest.NewRequest(http.MethodPost, "/generate", strings.NewReader(`{"slug":"default","metadata":{"email":"user@example.com"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer management_key_dev_123456")
 	rr := httptest.NewRecorder()
 
 	s.Routes().ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status 401, got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !called {
+		t.Fatalf("expected service GenerateLicense to be called")
+	}
+}
+
+func TestRevokeAcceptsManagementKeyForProvisioning(t *testing.T) {
+	revokedAt := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
+	called := false
+	s := NewServer(stubService{
+		isAuthorizedServerAPIKeyFn: func(ctx context.Context, candidate string) (bool, error) {
+			return candidate == "server_key_db_123456", nil
+		},
+		revokeLicenseFn: func(ctx context.Context, licenseKey string) (storage.RevokeResult, error) {
+			called = true
+			return storage.RevokeResult{
+				Valid:      false,
+				Status:     "revoked",
+				LicenseKey: licenseKey,
+				RevokedAt:  revokedAt,
+			}, nil
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
+
+	req := httptest.NewRequest(http.MethodPost, "/revoke", strings.NewReader(`{"license_key":"LNC-8821-X99B-4421"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer management_key_dev_123456")
+	rr := httptest.NewRecorder()
+
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !called {
+		t.Fatalf("expected service RevokeLicense to be called")
 	}
 }
 
@@ -294,6 +352,67 @@ func TestManagementEndpointWithManagementKey(t *testing.T) {
 
 	if !strings.Contains(rr.Body.String(), "api_keys") {
 		t.Fatalf("expected api keys payload, got %s", rr.Body.String())
+	}
+}
+
+func TestListLicensesUsesPaginationSearchAndStatus(t *testing.T) {
+	createdAt := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
+	var gotParams storage.LicenseListParams
+	s := NewServer(stubService{
+		listLicensesFn: func(ctx context.Context, params storage.LicenseListParams) (storage.LicenseListResult, error) {
+			gotParams = params
+			return storage.LicenseListResult{
+				Licenses: []storage.LicenseRow{
+					{
+						ID:             "license-id-1",
+						Key:            "LNC-8821-X99B-4421",
+						Status:         "active",
+						SlugName:       "default",
+						Metadata:       map[string]any{"email": "user@example.com"},
+						MaxActivations: 3,
+						ActiveSeats:    2,
+						CreatedAt:      createdAt,
+					},
+				},
+				Total: 42,
+				Counts: storage.LicenseStatusCounts{
+					Total:    1284,
+					Active:   942,
+					Inactive: 330,
+					Revoked:  12,
+				},
+			}, nil
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
+
+	req := httptest.NewRequest(http.MethodGet, "/management/licenses?page=2&page_size=25&q=LNC&status=active", nil)
+	req.Header.Set("Authorization", "Bearer management_key_dev_123456")
+	rr := httptest.NewRecorder()
+
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if gotParams.Page != 2 || gotParams.PageSize != 25 || gotParams.Search != "LNC" || gotParams.Status != "active" {
+		t.Fatalf("unexpected list params: %+v", gotParams)
+	}
+	if !strings.Contains(rr.Body.String(), "LNC-8821-X99B-4421") || !strings.Contains(rr.Body.String(), `"total_pages":2`) {
+		t.Fatalf("expected license list payload, got %s", rr.Body.String())
+	}
+}
+
+func TestListLicensesRejectsInvalidStatus(t *testing.T) {
+	s := NewServer(stubService{}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
+
+	req := httptest.NewRequest(http.MethodGet, "/management/licenses?status=pending", nil)
+	req.Header.Set("Authorization", "Bearer management_key_dev_123456")
+	rr := httptest.NewRecorder()
+
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -434,5 +553,48 @@ func TestHashGenerateRequestStableAcrossMetadataOrder(t *testing.T) {
 
 	if hashA != hashB {
 		t.Fatalf("expected stable hashes, got %q != %q", hashA, hashB)
+	}
+}
+
+func TestUIRoutesDisabledByDefault(t *testing.T) {
+	s := NewServerWithOptions(
+		stubService{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		map[string]struct{}{"management_key_dev_123456": {}},
+		Options{RequestTimeout: 15 * time.Second},
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/", nil)
+	rr := httptest.NewRecorder()
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404 when UI disabled, got %d", rr.Code)
+	}
+}
+
+func TestUIRoutesServeIndexWhenEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte("<html><body>ui ok</body></html>"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	s := NewServerWithOptions(
+		stubService{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		map[string]struct{}{"management_key_dev_123456": {}},
+		Options{RequestTimeout: 15 * time.Second, UIEnabled: true, UIDistDir: tmpDir},
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/", nil)
+	rr := httptest.NewRecorder()
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if !strings.Contains(rr.Body.String(), "ui ok") {
+		t.Fatalf("expected UI index content, got: %s", rr.Body.String())
 	}
 }

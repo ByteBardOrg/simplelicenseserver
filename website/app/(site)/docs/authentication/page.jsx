@@ -39,7 +39,7 @@ export default function AuthenticationPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>2) Generated server API key</h3>
         <p>
-          Create these from Management API, then use them for <code>/generate</code> and <code>/revoke</code>.
+          Create these from the Management API, then use them for <code>/generate</code> and <code>/revoke</code>.
         </p>
         <CodeExample language="bash" code={serverAuthExample} />
       </div>

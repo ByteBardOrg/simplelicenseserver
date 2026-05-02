@@ -12,6 +12,7 @@ type Config struct {
 	Port                  string
 	DatabaseURL           string
 	ManagementAPIKeys     map[string]struct{}
+	UIEnabled             bool
 	RequestTimeout        time.Duration
 	ShutdownTimeout       time.Duration
 	ReadTimeout           time.Duration
@@ -31,6 +32,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Port:                  strings.TrimSpace(getEnv("PORT", "8080")),
 		DatabaseURL:           strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		UIEnabled:             false,
 		RequestTimeout:        15 * time.Second,
 		ShutdownTimeout:       10 * time.Second,
 		ReadTimeout:           15 * time.Second,
@@ -153,6 +155,11 @@ func Load() (Config, error) {
 	}
 
 	cfg.TrustProxyHeaders, err = parseBoolEnv("TRUST_PROXY_HEADERS", cfg.TrustProxyHeaders)
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.UIEnabled, err = parseBoolEnv("UI_ENABLED", cfg.UIEnabled)
 	if err != nil {
 		return Config{}, err
 	}
