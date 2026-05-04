@@ -48,6 +48,7 @@ type activateResponse struct {
 	LicenseKey  string     `json:"license_key"`
 	Fingerprint string     `json:"fingerprint"`
 	ExpiresAt   *time.Time `json:"expires_at"`
+	Token       string     `json:"token,omitempty"`
 	Reason      string     `json:"reason,omitempty"`
 }
 
@@ -60,6 +61,7 @@ type validateResponse struct {
 	Valid     bool       `json:"valid"`
 	Status    string     `json:"status"`
 	ExpiresAt *time.Time `json:"expires_at"`
+	Token     string     `json:"token,omitempty"`
 	Reason    string     `json:"reason,omitempty"`
 }
 
@@ -294,12 +296,23 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	token := ""
+	if result.Valid && result.OfflineEnabled {
+		var err error
+		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, result.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
+		if err != nil {
+			s.writeUnexpectedError(w, "failed to issue offline token", err)
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, activateResponse{
 		Valid:       result.Valid,
 		Status:      result.Status,
 		LicenseKey:  result.LicenseKey,
 		Fingerprint: result.Fingerprint,
 		ExpiresAt:   result.ExpiresAt,
+		Token:       token,
 		Reason:      result.Reason,
 	})
 }
@@ -352,10 +365,21 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 		"reason":      result.Reason,
 	})
 
+	token := ""
+	if result.Valid && result.OfflineEnabled {
+		var err error
+		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, req.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
+		if err != nil {
+			s.writeUnexpectedError(w, "failed to refresh offline token", err)
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, validateResponse{
 		Valid:     result.Valid,
 		Status:    result.Status,
 		ExpiresAt: result.ExpiresAt,
+		Token:     token,
 		Reason:    result.Reason,
 	})
 }

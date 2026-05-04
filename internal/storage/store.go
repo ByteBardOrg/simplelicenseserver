@@ -48,6 +48,27 @@ type GeneratedLicense struct {
 	CreatedAt  time.Time
 }
 
+type LicenseListParams struct {
+	Page     int
+	PageSize int
+	Search   string
+	Status   string
+}
+
+type LicenseStatusCounts struct {
+	Total    int
+	Active   int
+	Inactive int
+	Revoked  int
+	Expired  int
+}
+
+type LicenseListResult struct {
+	Licenses []LicenseRow
+	Total    int
+	Counts   LicenseStatusCounts
+}
+
 type RevokeResult struct {
 	Valid      bool
 	Status     string
@@ -56,19 +77,27 @@ type RevokeResult struct {
 }
 
 type ActivationResult struct {
-	Valid       bool
-	Status      string
-	LicenseKey  string
-	Fingerprint string
-	ExpiresAt   *time.Time
-	Reason      string
+	Valid                       bool
+	Status                      string
+	LicenseID                   string
+	LicenseKey                  string
+	Slug                        string
+	Fingerprint                 string
+	ExpiresAt                   *time.Time
+	OfflineEnabled              bool
+	OfflineTokenLifetimeSeconds int
+	Reason                      string
 }
 
 type ValidationResult struct {
-	Valid     bool
-	Status    string
-	ExpiresAt *time.Time
-	Reason    string
+	Valid                       bool
+	Status                      string
+	LicenseID                   string
+	Slug                        string
+	ExpiresAt                   *time.Time
+	OfflineEnabled              bool
+	OfflineTokenLifetimeSeconds int
+	Reason                      string
 }
 
 type DeactivationResult struct {
@@ -132,25 +161,47 @@ type WebhookDelivery struct {
 	CreatedAt   time.Time
 }
 
-type licenseRow struct {
-	ID             string
-	Key            string
-	Status         string
-	ExpiresAt      *time.Time
-	CreatedAt      time.Time
-	ActivatedAt    *time.Time
-	RevokedAt      *time.Time
-	Metadata       map[string]any
-	SlugName       string
-	MaxActivations int
+type WebhookDeliveryLog struct {
+	ID                 int64
+	EndpointID         int64
+	EndpointName       string
+	EndpointURL        string
+	EventType          string
+	Status             string
+	Attempts           int
+	LastResponseStatus *int
+	LastError          *string
+	NextAttemptAt      time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeliveredAt        *time.Time
+}
+
+type LicenseRow struct {
+	ID                          string
+	Key                         string
+	Status                      string
+	ExpiresAt                   *time.Time
+	CreatedAt                   time.Time
+	ActivatedAt                 *time.Time
+	LastValidatedAt             *time.Time
+	RevokedAt                   *time.Time
+	Metadata                    map[string]any
+	SlugName                    string
+	OfflineEnabled              bool
+	OfflineTokenLifetimeSeconds int
+	MaxActivations              int
+	ActiveSeats                 int
 }
 
 type slugOptions struct {
-	SlugID         int64
-	ExpirationType string
-	ExpirationDays sql.NullInt32
-	FixedExpiresAt sql.NullTime
-	MaxActivations int
+	SlugID                      int64
+	ExpirationType              string
+	ExpirationDays              sql.NullInt32
+	FixedExpiresAt              sql.NullTime
+	MaxActivations              int
+	OfflineEnabled              bool
+	OfflineTokenLifetimeSeconds int
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -287,15 +338,18 @@ func generateLicenseWithQuerier(ctx context.Context, q queryable, slugName strin
 func loadSlugOptionsByName(ctx context.Context, q queryable, slugName string) (slugOptions, error) {
 	var options slugOptions
 	err := q.QueryRow(ctx, `
-		SELECT id, expiration_type, expiration_days, fixed_expires_at, max_activations
+		SELECT id, expiration_type, expiration_days, fixed_expires_at, max_activations, offline_enabled, offline_token_lifetime_seconds
 		FROM slugs
 		WHERE name = $1
+		  AND deleted_at IS NULL
 	`, slugName).Scan(
 		&options.SlugID,
 		&options.ExpirationType,
 		&options.ExpirationDays,
 		&options.FixedExpiresAt,
 		&options.MaxActivations,
+		&options.OfflineEnabled,
+		&options.OfflineTokenLifetimeSeconds,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -476,12 +530,16 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 
 	if !decision.Valid {
 		return ActivationResult{
-			Valid:       false,
-			Status:      string(decision.Status),
-			LicenseKey:  license.Key,
-			Fingerprint: fingerprint,
-			ExpiresAt:   license.ExpiresAt,
-			Reason:      string(decision.Reason),
+			Valid:                       false,
+			Status:                      string(decision.Status),
+			LicenseID:                   license.ID,
+			LicenseKey:                  license.Key,
+			Slug:                        license.SlugName,
+			Fingerprint:                 fingerprint,
+			ExpiresAt:                   license.ExpiresAt,
+			OfflineEnabled:              license.OfflineEnabled,
+			OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
+			Reason:                      string(decision.Reason),
 		}, nil
 	}
 
@@ -551,11 +609,15 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 	}
 
 	return ActivationResult{
-		Valid:       true,
-		Status:      string(aggregate.Status()),
-		LicenseKey:  license.Key,
-		Fingerprint: fingerprint,
-		ExpiresAt:   license.ExpiresAt,
+		Valid:                       true,
+		Status:                      string(aggregate.Status()),
+		LicenseID:                   license.ID,
+		LicenseKey:                  license.Key,
+		Slug:                        license.SlugName,
+		Fingerprint:                 fingerprint,
+		ExpiresAt:                   license.ExpiresAt,
+		OfflineEnabled:              license.OfflineEnabled,
+		OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
 	}, nil
 }
 
@@ -589,10 +651,14 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 	decision := aggregate.Validate(now, activeActivationID > 0)
 	if !decision.Valid {
 		return ValidationResult{
-			Valid:     decision.Valid,
-			Status:    string(decision.Status),
-			ExpiresAt: license.ExpiresAt,
-			Reason:    string(decision.Reason),
+			Valid:                       decision.Valid,
+			Status:                      string(decision.Status),
+			LicenseID:                   license.ID,
+			Slug:                        license.SlugName,
+			ExpiresAt:                   license.ExpiresAt,
+			OfflineEnabled:              license.OfflineEnabled,
+			OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
+			Reason:                      string(decision.Reason),
 		}, nil
 	}
 
@@ -629,9 +695,13 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 	}
 
 	return ValidationResult{
-		Valid:     decision.Valid,
-		Status:    string(aggregate.Status()),
-		ExpiresAt: license.ExpiresAt,
+		Valid:                       decision.Valid,
+		Status:                      string(aggregate.Status()),
+		LicenseID:                   license.ID,
+		Slug:                        license.SlugName,
+		ExpiresAt:                   license.ExpiresAt,
+		OfflineEnabled:              license.OfflineEnabled,
+		OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
 	}, nil
 }
 
@@ -1143,6 +1213,88 @@ func (s *Store) MarkWebhookDeliveryFailed(ctx context.Context, deliveryID int64,
 	return nil
 }
 
+func (s *Store) ListWebhookDeliveries(ctx context.Context, limit int) ([]WebhookDeliveryLog, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+
+	rows, err := s.db.Query(ctx, `
+		SELECT d.id,
+		       d.endpoint_id,
+		       w.name,
+		       w.url,
+		       d.event_type,
+		       d.status,
+		       d.attempts,
+		       d.last_response_status,
+		       d.last_error,
+		       d.next_attempt_at,
+		       d.created_at,
+		       d.updated_at,
+		       d.delivered_at
+		FROM webhook_deliveries d
+		JOIN webhook_endpoints w ON w.id = d.endpoint_id
+		ORDER BY d.updated_at DESC, d.id DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list webhook deliveries: %w", err)
+	}
+	defer rows.Close()
+
+	deliveries := make([]WebhookDeliveryLog, 0)
+	for rows.Next() {
+		var (
+			delivery           WebhookDeliveryLog
+			lastResponseStatus sql.NullInt32
+			lastError          sql.NullString
+			deliveredAt        sql.NullTime
+		)
+
+		if err := rows.Scan(
+			&delivery.ID,
+			&delivery.EndpointID,
+			&delivery.EndpointName,
+			&delivery.EndpointURL,
+			&delivery.EventType,
+			&delivery.Status,
+			&delivery.Attempts,
+			&lastResponseStatus,
+			&lastError,
+			&delivery.NextAttemptAt,
+			&delivery.CreatedAt,
+			&delivery.UpdatedAt,
+			&deliveredAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan webhook delivery log: %w", err)
+		}
+
+		if lastResponseStatus.Valid {
+			v := int(lastResponseStatus.Int32)
+			delivery.LastResponseStatus = &v
+		}
+		if lastError.Valid {
+			v := lastError.String
+			delivery.LastError = &v
+		}
+		if deliveredAt.Valid {
+			v := deliveredAt.Time.UTC()
+			delivery.DeliveredAt = &v
+		}
+
+		delivery.NextAttemptAt = delivery.NextAttemptAt.UTC()
+		delivery.CreatedAt = delivery.CreatedAt.UTC()
+		delivery.UpdatedAt = delivery.UpdatedAt.UTC()
+		deliveries = append(deliveries, delivery)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate webhook delivery logs: %w", err)
+	}
+
+	return deliveries, nil
+}
+
 func (s *Store) getWebhookEndpointByID(ctx context.Context, id int64) (WebhookEndpoint, error) {
 	var (
 		endpoint  WebhookEndpoint
@@ -1178,7 +1330,7 @@ func (s *Store) getWebhookEndpointByID(ctx context.Context, id int64) (WebhookEn
 	return endpoint, nil
 }
 
-func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool) (licenseRow, error) {
+func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool) (LicenseRow, error) {
 	query := `
 		SELECT l.id,
 		       l.key,
@@ -1189,7 +1341,9 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 		       l.activated_at,
 		       l.revoked_at,
 		       l.metadata,
-		       s.name
+		       s.name,
+		       s.offline_enabled,
+		       s.offline_token_lifetime_seconds
 		FROM licenses l
 		JOIN slugs s ON s.id = l.slug_id
 		WHERE l.key = $1
@@ -1200,7 +1354,7 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 
 	var (
 		metadataBytes []byte
-		row           licenseRow
+		row           LicenseRow
 	)
 
 	err := tx.QueryRow(ctx, query, key).Scan(
@@ -1214,12 +1368,14 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 		&row.RevokedAt,
 		&metadataBytes,
 		&row.SlugName,
+		&row.OfflineEnabled,
+		&row.OfflineTokenLifetimeSeconds,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return licenseRow{}, ErrNotFound
+			return LicenseRow{}, ErrNotFound
 		}
-		return licenseRow{}, fmt.Errorf("query license by key: %w", err)
+		return LicenseRow{}, fmt.Errorf("query license by key: %w", err)
 	}
 
 	if len(metadataBytes) == 0 {
@@ -1228,7 +1384,7 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 	}
 
 	if err := json.Unmarshal(metadataBytes, &row.Metadata); err != nil {
-		return licenseRow{}, fmt.Errorf("decode metadata json: %w", err)
+		return LicenseRow{}, fmt.Errorf("decode metadata json: %w", err)
 	}
 
 	return row, nil

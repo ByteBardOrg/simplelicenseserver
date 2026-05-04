@@ -37,6 +37,7 @@ func main() {
 
 	server := api.NewServerWithOptions(store, logger, cfg.ManagementAPIKeys, api.Options{
 		RequestTimeout:        cfg.RequestTimeout,
+		UIEnabled:             cfg.UIEnabled,
 		RateLimitEnabled:      cfg.RateLimitEnabled,
 		RateLimitGlobalRPS:    cfg.RateLimitGlobalRPS,
 		RateLimitGlobalBurst:  cfg.RateLimitGlobalBurst,
@@ -45,6 +46,9 @@ func main() {
 		RateLimitIPTTL:        cfg.RateLimitIPTTL,
 		RateLimitMaxIPEntries: cfg.RateLimitMaxIPEntries,
 		TrustProxyHeaders:     cfg.TrustProxyHeaders,
+		OfflineSigningKey:     cfg.OfflineSigningKey,
+		OfflineTokenIssuer:    cfg.OfflineTokenIssuer,
+		OfflineTokenAudience:  cfg.OfflineTokenAudience,
 	})
 
 	dispatcher := webhook.NewDispatcher(store, logger, webhook.DefaultOptions())

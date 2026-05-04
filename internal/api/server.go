@@ -13,6 +13,9 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,8 +38,11 @@ const (
 	maxMetadataDepth        = 5
 	maxMetadataNodes        = 512
 	maxAPIKeyNameLength     = 128
+	maxSigningKeyNameLength = 128
 	maxWebhookNameLength    = 128
 	maxWebhookURLLength     = 2048
+	maxSearchQueryLength    = 256
+	maxListPageSize         = 100
 	generateEndpointKey     = "/generate"
 )
 
@@ -80,10 +86,17 @@ type Server struct {
 	managementAPIKeyHashes [][]byte
 	requestTimeout         time.Duration
 	rateLimiter            *ipRateLimiter
+	uiEnabled              bool
+	uiDistDir              string
+	offlineSigningKey      string
+	offlineTokenIssuer     string
+	offlineTokenAudience   string
 }
 
 type Options struct {
 	RequestTimeout        time.Duration
+	UIEnabled             bool
+	UIDistDir             string
 	RateLimitEnabled      bool
 	RateLimitGlobalRPS    float64
 	RateLimitGlobalBurst  int
@@ -92,11 +105,16 @@ type Options struct {
 	RateLimitIPTTL        time.Duration
 	RateLimitMaxIPEntries int
 	TrustProxyHeaders     bool
+	OfflineSigningKey     string
+	OfflineTokenIssuer    string
+	OfflineTokenAudience  string
 }
 
 func DefaultOptions() Options {
 	return Options{
 		RequestTimeout:        15 * time.Second,
+		UIEnabled:             false,
+		UIDistDir:             "/app/ui",
 		RateLimitEnabled:      true,
 		RateLimitGlobalRPS:    100,
 		RateLimitGlobalBurst:  200,
@@ -105,6 +123,7 @@ func DefaultOptions() Options {
 		RateLimitIPTTL:        10 * time.Minute,
 		RateLimitMaxIPEntries: 10000,
 		TrustProxyHeaders:     false,
+		OfflineTokenIssuer:    "simple-license-server",
 	}
 }
 
@@ -114,11 +133,12 @@ type licenseService interface {
 	IsAuthorizedServerAPIKey(ctx context.Context, candidate string) (bool, error)
 	GenerateLicenseIdempotent(ctx context.Context, endpoint, idemKey, requestHash, slugName string, metadata map[string]any) (storage.GeneratedLicense, json.RawMessage, bool, error)
 	GenerateLicense(ctx context.Context, slugName string, metadata map[string]any) (storage.GeneratedLicense, error)
+	ListLicenses(ctx context.Context, params storage.LicenseListParams) (storage.LicenseListResult, error)
 	RevokeLicense(ctx context.Context, licenseKey string) (storage.RevokeResult, error)
 	ActivateLicense(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error)
 	ValidateLicense(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error)
 	DeactivateLicense(ctx context.Context, licenseKey, fingerprint, reason string) (storage.DeactivationResult, error)
-	ListSlugs(ctx context.Context) ([]storage.SlugRecord, error)
+	ListSlugs(ctx context.Context, includeArchived bool) ([]storage.SlugRecord, error)
 	GetSlugByName(ctx context.Context, name string) (storage.SlugRecord, error)
 	CreateSlug(ctx context.Context, params storage.CreateSlugParams) (storage.SlugRecord, error)
 	UpdateSlugByName(ctx context.Context, name string, params storage.UpdateSlugParams) (storage.SlugRecord, error)
@@ -127,9 +147,16 @@ type licenseService interface {
 	CreateAPIKey(ctx context.Context, params storage.CreateAPIKeyParams) (storage.CreatedAPIKey, error)
 	RevokeAPIKey(ctx context.Context, id int64) (storage.APIKeyRecord, error)
 	ListWebhookEndpoints(ctx context.Context) ([]storage.WebhookEndpoint, error)
+	ListWebhookDeliveries(ctx context.Context, limit int) ([]storage.WebhookDeliveryLog, error)
 	CreateWebhookEndpoint(ctx context.Context, params storage.CreateWebhookEndpointParams) (storage.WebhookEndpoint, error)
 	UpdateWebhookEndpoint(ctx context.Context, id int64, params storage.UpdateWebhookEndpointParams) (storage.WebhookEndpoint, error)
 	DeleteWebhookEndpoint(ctx context.Context, id int64) error
+	ListSigningKeys(ctx context.Context) ([]storage.SigningKeyRecord, error)
+	ListPublicSigningKeys(ctx context.Context) ([]storage.SigningKeyRecord, error)
+	GetActiveSigningKey(ctx context.Context) (storage.SigningKeyRecord, error)
+	CreateSigningKey(ctx context.Context, params storage.CreateSigningKeyParams) (storage.SigningKeyRecord, error)
+	ActivateSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
+	RetireSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
 }
 
 func NewServer(service licenseService, logger *slog.Logger, managementAPIKeys map[string]struct{}, requestTimeout time.Duration) *Server {
@@ -167,11 +194,23 @@ func NewServerWithOptions(service licenseService, logger *slog.Logger, managemen
 		opts.RateLimitMaxIPEntries = DefaultOptions().RateLimitMaxIPEntries
 	}
 
+	if strings.TrimSpace(opts.UIDistDir) == "" {
+		opts.UIDistDir = DefaultOptions().UIDistDir
+	}
+	if strings.TrimSpace(opts.OfflineTokenIssuer) == "" {
+		opts.OfflineTokenIssuer = DefaultOptions().OfflineTokenIssuer
+	}
+
 	return &Server{
 		service:                service,
 		logger:                 logger,
 		managementAPIKeyHashes: hashManagementAPIKeys(managementAPIKeys),
 		requestTimeout:         opts.RequestTimeout,
+		uiEnabled:              opts.UIEnabled,
+		uiDistDir:              opts.UIDistDir,
+		offlineSigningKey:      strings.TrimSpace(opts.OfflineSigningKey),
+		offlineTokenIssuer:     strings.TrimSpace(opts.OfflineTokenIssuer),
+		offlineTokenAudience:   strings.TrimSpace(opts.OfflineTokenAudience),
 		rateLimiter: newIPRateLimiter(rateLimiterConfig{
 			enabled:           opts.RateLimitEnabled,
 			globalRPS:         opts.RateLimitGlobalRPS,
@@ -202,10 +241,21 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /management/api-keys", s.requireManagementKey(http.HandlerFunc(s.handleListAPIKeys)))
 	mux.Handle("POST /management/api-keys", s.requireManagementKey(http.HandlerFunc(s.handleCreateAPIKey)))
 	mux.Handle("POST /management/api-keys/{id}/revoke", s.requireManagementKey(http.HandlerFunc(s.handleRevokeAPIKey)))
+	mux.Handle("GET /management/licenses", s.requireManagementKey(http.HandlerFunc(s.handleListLicenses)))
 	mux.Handle("GET /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleListWebhooks)))
+	mux.Handle("GET /management/webhooks/deliveries", s.requireManagementKey(http.HandlerFunc(s.handleListWebhookDeliveries)))
 	mux.Handle("POST /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleCreateWebhook)))
 	mux.Handle("PATCH /management/webhooks/{id}", s.requireManagementKey(http.HandlerFunc(s.handleUpdateWebhook)))
 	mux.Handle("DELETE /management/webhooks/{id}", s.requireManagementKey(http.HandlerFunc(s.handleDeleteWebhook)))
+	mux.Handle("GET /management/offline/signing-keys", s.requireManagementKey(http.HandlerFunc(s.handleListSigningKeys)))
+	mux.Handle("POST /management/offline/signing-keys", s.requireManagementKey(http.HandlerFunc(s.handleCreateSigningKey)))
+	mux.Handle("POST /management/offline/signing-keys/{id}/activate", s.requireManagementKey(http.HandlerFunc(s.handleActivateSigningKey)))
+	mux.Handle("POST /management/offline/signing-keys/{id}/retire", s.requireManagementKey(http.HandlerFunc(s.handleRetireSigningKey)))
+	mux.Handle("GET /management/offline/public-keys", s.requireManagementKey(http.HandlerFunc(s.handleListPublicSigningKeys)))
+
+	if s.uiEnabled {
+		s.registerUIRoutes(mux)
+	}
 
 	handler := s.requestTimeoutMiddleware(mux)
 	handler = s.rateLimitMiddleware(handler)
@@ -225,6 +275,11 @@ func (s *Server) requireProvisioningKey(next http.Handler) http.Handler {
 		apiKey := extractAPIKey(r)
 		if apiKey == "" {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "missing API key"})
+			return
+		}
+
+		if s.isAuthorizedManagementKey(apiKey) {
+			next.ServeHTTP(w, r)
 			return
 		}
 
@@ -327,9 +382,96 @@ func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		if strings.HasPrefix(r.URL.Path, "/ui") {
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'")
+		} else {
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) registerUIRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /ui", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("GET /ui/", s.handleUISPA)
+}
+
+func (s *Server) handleUISPA(w http.ResponseWriter, r *http.Request) {
+	if !s.uiEnabled {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "not found"})
+		return
+	}
+
+	requested := strings.TrimPrefix(r.URL.Path, "/ui/")
+	cleanPath := path.Clean("/" + requested)
+	if cleanPath == "/" {
+		s.serveUIFile(w, r, filepath.Join(s.uiDistDir, "index.html"))
+		return
+	}
+
+	relPath := strings.TrimPrefix(cleanPath, "/")
+	fullPath := filepath.Join(s.uiDistDir, filepath.FromSlash(relPath))
+	if !isPathInsideRoot(s.uiDistDir, fullPath) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid path"})
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err == nil && !info.IsDir() {
+		s.serveUIFile(w, r, fullPath)
+		return
+	}
+
+	if errors.Is(err, os.ErrNotExist) || (err == nil && info.IsDir()) {
+		s.serveUIFile(w, r, filepath.Join(s.uiDistDir, "index.html"))
+		return
+	}
+
+	writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "ui asset lookup failed"})
+}
+
+func (s *Server) serveUIFile(w http.ResponseWriter, r *http.Request, fullPath string) {
+	if !isPathInsideRoot(s.uiDistDir, fullPath) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid path"})
+		return
+	}
+
+	_, err := os.Stat(fullPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "ui not found; build frontend assets first"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "ui asset read failed"})
+		return
+	}
+
+	http.ServeFile(w, r, fullPath)
+}
+
+func isPathInsideRoot(root, candidate string) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return false
+	}
+
+	rel, err := filepath.Rel(absRoot, absCandidate)
+	if err != nil {
+		return false
+	}
+
+	if rel == "." {
+		return true
+	}
+
+	return !strings.HasPrefix(rel, "..")
 }
 
 func (s *Server) writeUnexpectedError(w http.ResponseWriter, logMsg string, err error) {
@@ -630,6 +772,23 @@ func parsePathID(raw string) (int64, error) {
 	}
 
 	return id, nil
+}
+
+func parsePositiveIntQuery(values url.Values, name string, defaultValue, maxValue int) (int, error) {
+	raw := strings.TrimSpace(values.Get(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	if maxValue > 0 && value > maxValue {
+		return maxValue, nil
+	}
+
+	return value, nil
 }
 
 func normalizeWebhookEvents(events []string) ([]string, error) {
