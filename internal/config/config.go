@@ -12,6 +12,7 @@ type Config struct {
 	Port                  string
 	DatabaseURL           string
 	ManagementAPIKeys     map[string]struct{}
+	UIEnabled             bool
 	RequestTimeout        time.Duration
 	ShutdownTimeout       time.Duration
 	ReadTimeout           time.Duration
@@ -25,12 +26,16 @@ type Config struct {
 	RateLimitIPTTL        time.Duration
 	RateLimitMaxIPEntries int
 	TrustProxyHeaders     bool
+	OfflineSigningKey     string
+	OfflineTokenIssuer    string
+	OfflineTokenAudience  string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
 		Port:                  strings.TrimSpace(getEnv("PORT", "8080")),
 		DatabaseURL:           strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		UIEnabled:             false,
 		RequestTimeout:        15 * time.Second,
 		ShutdownTimeout:       10 * time.Second,
 		ReadTimeout:           15 * time.Second,
@@ -44,6 +49,7 @@ func Load() (Config, error) {
 		RateLimitIPTTL:        10 * time.Minute,
 		RateLimitMaxIPEntries: 10000,
 		TrustProxyHeaders:     false,
+		OfflineTokenIssuer:    "simple-license-server",
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -156,6 +162,15 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+
+	cfg.UIEnabled, err = parseBoolEnv("UI_ENABLED", cfg.UIEnabled)
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.OfflineSigningKey = strings.TrimSpace(os.Getenv("OFFLINE_SIGNING_ENCRYPTION_KEY"))
+	cfg.OfflineTokenIssuer = strings.TrimSpace(getEnv("OFFLINE_TOKEN_ISSUER", cfg.OfflineTokenIssuer))
+	cfg.OfflineTokenAudience = strings.TrimSpace(os.Getenv("OFFLINE_TOKEN_AUDIENCE"))
 
 	if cfg.RateLimitEnabled {
 		if cfg.RateLimitGlobalRPS <= 0 || cfg.RateLimitPerIPRPS <= 0 {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,15 +13,18 @@ import (
 )
 
 type slugResponse struct {
-	ID             int64      `json:"id"`
-	Name           string     `json:"name"`
-	MaxActivations int        `json:"max_activations"`
-	ExpirationType string     `json:"expiration_type"`
-	ExpirationDays *int       `json:"expiration_days"`
-	FixedExpiresAt *time.Time `json:"fixed_expires_at"`
-	IsDefault      bool       `json:"is_default"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID                        int64      `json:"id"`
+	Name                      string     `json:"name"`
+	MaxActivations            int        `json:"max_activations"`
+	ExpirationType            string     `json:"expiration_type"`
+	ExpirationDays            *int       `json:"expiration_days"`
+	FixedExpiresAt            *time.Time `json:"fixed_expires_at"`
+	OfflineEnabled            bool       `json:"offline_enabled"`
+	OfflineTokenLifetimeHours int        `json:"offline_token_lifetime_hours"`
+	IsDefault                 bool       `json:"is_default"`
+	DeletedAt                 *time.Time `json:"deleted_at"`
+	CreatedAt                 time.Time  `json:"created_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
 }
 
 type listSlugsResponse struct {
@@ -28,23 +32,37 @@ type listSlugsResponse struct {
 }
 
 type createSlugRequest struct {
-	Name           string  `json:"name"`
-	MaxActivations int     `json:"max_activations"`
-	ExpirationType string  `json:"expiration_type"`
-	ExpirationDays *int    `json:"expiration_days"`
-	FixedExpiresAt *string `json:"fixed_expires_at"`
+	Name                      string  `json:"name"`
+	MaxActivations            int     `json:"max_activations"`
+	ExpirationType            string  `json:"expiration_type"`
+	ExpirationDays            *int    `json:"expiration_days"`
+	FixedExpiresAt            *string `json:"fixed_expires_at"`
+	OfflineEnabled            bool    `json:"offline_enabled"`
+	OfflineTokenLifetimeHours *int    `json:"offline_token_lifetime_hours"`
 }
 
 type updateSlugRequest struct {
-	Name           *string `json:"name"`
-	MaxActivations *int    `json:"max_activations"`
-	ExpirationType *string `json:"expiration_type"`
-	ExpirationDays *int    `json:"expiration_days"`
-	FixedExpiresAt *string `json:"fixed_expires_at"`
+	Name                      *string `json:"name"`
+	MaxActivations            *int    `json:"max_activations"`
+	ExpirationType            *string `json:"expiration_type"`
+	ExpirationDays            *int    `json:"expiration_days"`
+	FixedExpiresAt            *string `json:"fixed_expires_at"`
+	OfflineEnabled            *bool   `json:"offline_enabled"`
+	OfflineTokenLifetimeHours *int    `json:"offline_token_lifetime_hours"`
 }
 
 func (s *Server) handleListSlugs(w http.ResponseWriter, r *http.Request) {
-	items, err := s.service.ListSlugs(r.Context())
+	includeArchived := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("include_archived")); raw != "" {
+		parsed, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "include_archived must be a boolean"})
+			return
+		}
+		includeArchived = parsed
+	}
+
+	items, err := s.service.ListSlugs(r.Context(), includeArchived)
 	if err != nil {
 		s.writeUnexpectedError(w, "failed to list slugs", err)
 		return
@@ -99,12 +117,23 @@ func (s *Server) handleCreateSlug(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	offlineTokenLifetimeHours := storage.DefaultOfflineTokenLifetimeHours
+	if req.OfflineTokenLifetimeHours != nil {
+		offlineTokenLifetimeHours = *req.OfflineTokenLifetimeHours
+	}
+	if err := validateOfflineTokenLifetimeHours(offlineTokenLifetimeHours); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
 	record, err := s.service.CreateSlug(r.Context(), storage.CreateSlugParams{
-		Name:           req.Name,
-		MaxActivations: policy.MaxActivations(),
-		ExpirationType: policy.ExpirationType(),
-		ExpirationDays: policy.ExpirationDays(),
-		FixedExpiresAt: policy.FixedExpiresAt(),
+		Name:                        req.Name,
+		MaxActivations:              policy.MaxActivations(),
+		ExpirationType:              policy.ExpirationType(),
+		ExpirationDays:              policy.ExpirationDays(),
+		FixedExpiresAt:              policy.FixedExpiresAt(),
+		OfflineEnabled:              req.OfflineEnabled,
+		OfflineTokenLifetimeSeconds: offlineTokenLifetimeHours * 3600,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrConflict) {
@@ -141,7 +170,7 @@ func (s *Server) handleUpdateSlug(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == nil && req.MaxActivations == nil && req.ExpirationType == nil && req.ExpirationDays == nil && req.FixedExpiresAt == nil {
+	if req.Name == nil && req.MaxActivations == nil && req.ExpirationType == nil && req.ExpirationDays == nil && req.FixedExpiresAt == nil && req.OfflineEnabled == nil && req.OfflineTokenLifetimeHours == nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "at least one field must be provided"})
 		return
 	}
@@ -192,6 +221,16 @@ func (s *Server) handleUpdateSlug(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var offlineTokenLifetimeSeconds *int
+	if req.OfflineTokenLifetimeHours != nil {
+		if err := validateOfflineTokenLifetimeHours(*req.OfflineTokenLifetimeHours); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		v := *req.OfflineTokenLifetimeHours * 3600
+		offlineTokenLifetimeSeconds = &v
+	}
+
 	nameParam := resolvedName
 	maxParam := policy.MaxActivations()
 	expTypeParam := policy.ExpirationType()
@@ -199,11 +238,13 @@ func (s *Server) handleUpdateSlug(w http.ResponseWriter, r *http.Request) {
 	fixedParam := policy.FixedExpiresAt()
 
 	record, err := s.service.UpdateSlugByName(r.Context(), name, storage.UpdateSlugParams{
-		Name:           &nameParam,
-		MaxActivations: &maxParam,
-		ExpirationType: &expTypeParam,
-		ExpirationDays: expDaysParam,
-		FixedExpiresAt: &fixedParam,
+		Name:                        &nameParam,
+		MaxActivations:              &maxParam,
+		ExpirationType:              &expTypeParam,
+		ExpirationDays:              expDaysParam,
+		FixedExpiresAt:              &fixedParam,
+		OfflineEnabled:              req.OfflineEnabled,
+		OfflineTokenLifetimeSeconds: offlineTokenLifetimeSeconds,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -247,15 +288,18 @@ func (s *Server) handleDeleteSlug(w http.ResponseWriter, r *http.Request) {
 
 func mapSlugResponse(record storage.SlugRecord) slugResponse {
 	return slugResponse{
-		ID:             record.ID,
-		Name:           record.Name,
-		MaxActivations: record.MaxActivations,
-		ExpirationType: record.ExpirationType,
-		ExpirationDays: record.ExpirationDays,
-		FixedExpiresAt: record.FixedExpiresAt,
-		IsDefault:      record.IsDefault,
-		CreatedAt:      record.CreatedAt,
-		UpdatedAt:      record.UpdatedAt,
+		ID:                        record.ID,
+		Name:                      record.Name,
+		MaxActivations:            record.MaxActivations,
+		ExpirationType:            record.ExpirationType,
+		ExpirationDays:            record.ExpirationDays,
+		FixedExpiresAt:            record.FixedExpiresAt,
+		OfflineEnabled:            record.OfflineEnabled,
+		OfflineTokenLifetimeHours: offlineTokenLifetimeHoursFromSeconds(record.OfflineTokenLifetimeSeconds),
+		IsDefault:                 record.IsDefault,
+		DeletedAt:                 record.DeletedAt,
+		CreatedAt:                 record.CreatedAt,
+		UpdatedAt:                 record.UpdatedAt,
 	}
 }
 
@@ -284,6 +328,22 @@ func resolveSlugPolicy(maxActivations int, expirationType string, expirationDays
 	}
 
 	return slugdomain.NewPolicy(maxActivations, expirationType, expirationDays, fixedExpiresAt)
+}
+
+func validateOfflineTokenLifetimeHours(value int) error {
+	if value <= 0 {
+		return fmt.Errorf("offline_token_lifetime_hours must be greater than 0")
+	}
+
+	return nil
+}
+
+func offlineTokenLifetimeHoursFromSeconds(seconds int) int {
+	if seconds <= 0 {
+		return storage.DefaultOfflineTokenLifetimeHours
+	}
+
+	return (seconds + 3599) / 3600
 }
 
 func parseOptionalRFC3339(raw string) (*time.Time, error) {

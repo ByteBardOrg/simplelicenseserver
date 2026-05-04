@@ -23,6 +23,26 @@ type listWebhookEndpointsResponse struct {
 	Webhooks []webhookEndpointResponse `json:"webhooks"`
 }
 
+type webhookDeliveryResponse struct {
+	ID                 int64      `json:"id"`
+	EndpointID         int64      `json:"endpoint_id"`
+	EndpointName       string     `json:"endpoint_name"`
+	EndpointURL        string     `json:"endpoint_url"`
+	EventType          string     `json:"event_type"`
+	Status             string     `json:"status"`
+	Attempts           int        `json:"attempts"`
+	LastResponseStatus *int       `json:"last_response_status"`
+	LastError          *string    `json:"last_error"`
+	NextAttemptAt      time.Time  `json:"next_attempt_at"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	DeliveredAt        *time.Time `json:"delivered_at"`
+}
+
+type listWebhookDeliveriesResponse struct {
+	Deliveries []webhookDeliveryResponse `json:"deliveries"`
+}
+
 type createWebhookRequest struct {
 	Name    string   `json:"name"`
 	URL     string   `json:"url"`
@@ -50,6 +70,27 @@ func (s *Server) handleListWebhooks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, listWebhookEndpointsResponse{Webhooks: response})
+}
+
+func (s *Server) handleListWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
+	limit, err := parsePositiveIntQuery(r.URL.Query(), "limit", 25, maxListPageSize)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	deliveries, err := s.service.ListWebhookDeliveries(r.Context(), limit)
+	if err != nil {
+		s.writeUnexpectedError(w, "failed to list webhook deliveries", err)
+		return
+	}
+
+	response := make([]webhookDeliveryResponse, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		response = append(response, mapWebhookDeliveryResponse(delivery))
+	}
+
+	writeJSON(w, http.StatusOK, listWebhookDeliveriesResponse{Deliveries: response})
 }
 
 func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -196,4 +237,22 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func mapWebhookDeliveryResponse(delivery storage.WebhookDeliveryLog) webhookDeliveryResponse {
+	return webhookDeliveryResponse{
+		ID:                 delivery.ID,
+		EndpointID:         delivery.EndpointID,
+		EndpointName:       delivery.EndpointName,
+		EndpointURL:        delivery.EndpointURL,
+		EventType:          delivery.EventType,
+		Status:             delivery.Status,
+		Attempts:           delivery.Attempts,
+		LastResponseStatus: delivery.LastResponseStatus,
+		LastError:          delivery.LastError,
+		NextAttemptAt:      delivery.NextAttemptAt,
+		CreatedAt:          delivery.CreatedAt,
+		UpdatedAt:          delivery.UpdatedAt,
+		DeliveredAt:        delivery.DeliveredAt,
+	}
 }

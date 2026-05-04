@@ -1,9 +1,11 @@
-# simplelicenseserver
-https://simplelicenseserver.com
+# Simple License Server API
 
-A simple, postgres-backed license server.
+Current API version: `0.2.0`
 
-## Endpoints
+This repository contains the Go API implementation for the license and management flows described in `simple-license-server.md`.
+
+## Implemented endpoints
+
 License API:
 
 - `GET /healthz`
@@ -27,79 +29,103 @@ Management API:
 - `POST /management/webhooks`
 - `PATCH /management/webhooks/{id}`
 - `DELETE /management/webhooks/{id}`
+- `GET /management/offline/signing-keys`
+- `POST /management/offline/signing-keys`
+- `POST /management/offline/signing-keys/{id}/activate`
+- `POST /management/offline/signing-keys/{id}/retire`
+- `GET /management/offline/public-keys`
 
+`POST /generate` supports idempotency via the `Idempotency-Key` request header.
 
-## Example Compose
-```yaml
-services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: simple_license_server
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d simple_license_server"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    # Optional: expose Postgres to your host for debugging.
-    # ports:
-    #   - "5432:5432"
+## Local development
 
-  api:
-    image: bytebardorg/simplelicenseserver
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8080:8080"
-    environment:
-      # REQUIRED: database connection used by the API service.
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/simple_license_server?sslmode=disable
+1. Start Postgres.
+2. Copy `.env.example` values into your environment.
+3. Run:
 
-      # REQUIRED: management bootstrap key (16+ chars). You can also use MANAGEMENT_API_KEY.
-      MANAGEMENT_API_KEYS: management_key_dev_123456
-
-      # OPTIONAL: API listen port (default: 8080).
-      PORT: "8080"
-
-      # OPTIONAL: request and server shutdown controls.
-      REQUEST_TIMEOUT: 15s
-      SHUTDOWN_TIMEOUT: 10s
-      HTTP_READ_TIMEOUT: 15s
-      HTTP_WRITE_TIMEOUT: 30s
-      HTTP_IDLE_TIMEOUT: 60s
-
-      # OPTIONAL: global and per-IP rate limiting.
-      RATE_LIMIT_ENABLED: "true"
-      RATE_LIMIT_GLOBAL_RPS: "100"
-      RATE_LIMIT_GLOBAL_BURST: "200"
-      RATE_LIMIT_PER_IP_RPS: "20"
-      RATE_LIMIT_PER_IP_BURST: "40"
-      RATE_LIMIT_IP_TTL: 10m
-      RATE_LIMIT_MAX_IP_ENTRIES: "10000"
-
-      # OPTIONAL: set true only when a trusted proxy sets forwarding headers.
-      TRUST_PROXY_HEADERS: "false"
-
-volumes:
-  postgres_data:
+```bash
+go run ./cmd/server
 ```
 
-## What it is not
-Simple License Server is not a product management solution.
+The server auto-runs schema setup on startup and ensures a default slug named `default` exists.
 
-It is also not a checkout or billing orchestration system.
-It is a focused license server that can be safely exposed to the internet and used for:
+## Docker compose
 
-- issuing licenses
-- activating licenses
-- deactivating seats
-- validating licenses
-- revoking licenses
-- managing simple policy through slugs
+```bash
+docker compose up --build
+```
+
+This starts:
+
+- Postgres on `localhost:5432`
+- API on `localhost:8080`
+
+## Quick smoke test
+
+1) Create a generated server key with the management key:
+
+```bash
+curl -sS http://localhost:8080/management/api-keys \
+  -H "Authorization: Bearer management_key_dev_123456" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"local-dev"}'
+```
+
+2) Use returned `api_key` against `/generate`:
+
+```bash
+curl -sS http://localhost:8080/generate \
+  -H "Authorization: Bearer <generated_server_api_key>" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: evt_123" \
+  -d '{"slug":"default","metadata":{"email":"user@example.com"}}'
+```
+
+## Authentication
+
+- Management API routes require env bootstrap keys from `MANAGEMENT_API_KEYS` or `MANAGEMENT_API_KEY`.
+- Provisioning routes (`/generate`, `/revoke`) require generated active server API keys from the management API.
+- Runtime routes (`/activate`, `/validate`, `/deactivate`) use `license_key` + `fingerprint` and do not use API keys.
+
+Both key-protected surfaces accept either:
+
+- `Authorization: Bearer <key>`
+- `X-API-Key: <key>`
+
+## Operational defaults
+
+Timeout controls:
+
+- `REQUEST_TIMEOUT` (default `15s`)
+- `SHUTDOWN_TIMEOUT` (default `10s`)
+- `HTTP_READ_TIMEOUT` (default `15s`)
+- `HTTP_WRITE_TIMEOUT` (default `30s`)
+- `HTTP_IDLE_TIMEOUT` (default `60s`)
+
+Rate limiting defaults:
+
+- `RATE_LIMIT_ENABLED` (default `true`)
+- `RATE_LIMIT_GLOBAL_RPS` (default `100`)
+- `RATE_LIMIT_GLOBAL_BURST` (default `200`)
+- `RATE_LIMIT_PER_IP_RPS` (default `20`)
+- `RATE_LIMIT_PER_IP_BURST` (default `40`)
+- `RATE_LIMIT_IP_TTL` (default `10m`)
+- `RATE_LIMIT_MAX_IP_ENTRIES` (default `10000`)
+- `TRUST_PROXY_HEADERS` (default `false`)
+
+Offline token defaults:
+
+- Offline JWT issuance is controlled per slug with `offline_enabled` and `offline_token_lifetime_hours`.
+- All slugs, including the seeded `default` slug, default to offline disabled.
+- `POST /activate` and valid `POST /validate` responses include `token` only when the license slug has offline enabled and an active signing key exists.
+- `OFFLINE_SIGNING_ENCRYPTION_KEY` encrypts signing private keys at rest and must be at least 32 characters before creating or using signing keys.
+- `OFFLINE_TOKEN_ISSUER` defaults to `simple-license-server`.
+- `OFFLINE_TOKEN_AUDIENCE` is optional.
+- Slug `offline_token_lifetime_hours` defaults to `24`.
+
+Additional API security behavior:
+
+- Requires `Content-Type: application/json` for JSON POST/PATCH endpoints.
+- Applies defensive response headers (`nosniff`, CSP, no-store cache policy).
+- Enforces request field and metadata size limits.
+- Stores generated API keys hashed at rest.
