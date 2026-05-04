@@ -10,17 +10,20 @@ import (
 )
 
 type licenseManagementResponse struct {
-	ID             string         `json:"id"`
-	LicenseKey     string         `json:"license_key"`
-	Slug           string         `json:"slug"`
-	Status         string         `json:"status"`
-	Metadata       map[string]any `json:"metadata"`
-	MaxActivations int            `json:"max_activations"`
-	ActiveSeats    int            `json:"active_seats"`
-	ExpiresAt      *time.Time     `json:"expires_at"`
-	CreatedAt      time.Time      `json:"created_at"`
-	ActivatedAt    *time.Time     `json:"activated_at"`
-	RevokedAt      *time.Time     `json:"revoked_at"`
+	ID                          string         `json:"id"`
+	LicenseKey                  string         `json:"license_key"`
+	Slug                        string         `json:"slug"`
+	Status                      string         `json:"status"`
+	Metadata                    map[string]any `json:"metadata"`
+	MaxActivations              int            `json:"max_activations"`
+	ActiveSeats                 int            `json:"active_seats"`
+	OfflineEnabled              bool           `json:"offline_enabled"`
+	OfflineTokenLifetimeHours   int            `json:"offline_token_lifetime_hours"`
+	ExpiresAt                   *time.Time     `json:"expires_at"`
+	CreatedAt                   time.Time      `json:"created_at"`
+	ActivatedAt                 *time.Time     `json:"activated_at"`
+	LastValidatedAt             *time.Time     `json:"last_validated_at"`
+	RevokedAt                   *time.Time     `json:"revoked_at"`
 }
 
 type licensePaginationResponse struct {
@@ -106,17 +109,20 @@ func (s *Server) handleListLicenses(w http.ResponseWriter, r *http.Request) {
 
 func mapLicenseManagementResponse(record storage.LicenseRow) licenseManagementResponse {
 	return licenseManagementResponse{
-		ID:             record.ID,
-		LicenseKey:     record.Key,
-		Slug:           record.SlugName,
-		Status:         displayLicenseStatus(record),
-		Metadata:       record.Metadata,
-		MaxActivations: record.MaxActivations,
-		ActiveSeats:    record.ActiveSeats,
-		ExpiresAt:      record.ExpiresAt,
-		CreatedAt:      record.CreatedAt,
-		ActivatedAt:    record.ActivatedAt,
-		RevokedAt:      record.RevokedAt,
+		ID:                          record.ID,
+		LicenseKey:                  record.Key,
+		Slug:                        record.SlugName,
+		Status:                      displayLicenseStatus(record),
+		Metadata:                    record.Metadata,
+		MaxActivations:              record.MaxActivations,
+		ActiveSeats:                 record.ActiveSeats,
+		OfflineEnabled:              record.OfflineEnabled,
+		OfflineTokenLifetimeHours:   offlineTokenLifetimeHoursFromSeconds(record.OfflineTokenLifetimeSeconds),
+		ExpiresAt:                   record.ExpiresAt,
+		CreatedAt:                   record.CreatedAt,
+		ActivatedAt:                 record.ActivatedAt,
+		LastValidatedAt:             record.LastValidatedAt,
+		RevokedAt:                   record.RevokedAt,
 	}
 }
 

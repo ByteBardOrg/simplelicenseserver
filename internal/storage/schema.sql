@@ -7,7 +7,10 @@ CREATE TABLE IF NOT EXISTS slugs (
     expiration_type TEXT NOT NULL CHECK (expiration_type IN ('forever', 'duration', 'fixed_date')),
     expiration_days INTEGER,
     fixed_expires_at TIMESTAMPTZ,
+    offline_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    offline_token_lifetime_seconds INTEGER NOT NULL DEFAULT 86400,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (
@@ -31,7 +34,40 @@ BEGIN
     END IF;
 END $$;
 
+ALTER TABLE slugs
+    ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+ALTER TABLE slugs
+    ADD COLUMN IF NOT EXISTS offline_token_lifetime_seconds INTEGER NOT NULL DEFAULT 86400;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_slugs_offline_token_lifetime_positive'
+          AND conrelid = 'slugs'::regclass
+    ) THEN
+        ALTER TABLE slugs
+            ADD CONSTRAINT chk_slugs_offline_token_lifetime_positive
+            CHECK (offline_token_lifetime_seconds > 0);
+    END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_slugs_default_true ON slugs (is_default) WHERE is_default;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'slugs'
+          AND column_name = 'offline_enabled'
+    ) THEN
+        ALTER TABLE slugs
+            ADD COLUMN offline_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS licenses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -163,9 +199,26 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_pending
 ON webhook_deliveries (status, next_attempt_at, id);
 
+CREATE TABLE IF NOT EXISTS signing_keys (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    kid TEXT NOT NULL UNIQUE,
+    algorithm TEXT NOT NULL CHECK (algorithm IN ('Ed25519')),
+    status TEXT NOT NULL CHECK (status IN ('active', 'verify_only', 'retired')),
+    private_key_encrypted TEXT NOT NULL,
+    public_key_pem TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    activated_at TIMESTAMPTZ,
+    retired_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_signing_keys_active
+ON signing_keys ((status))
+WHERE status = 'active';
+
 ALTER TABLE idempotency_records
     ALTER COLUMN response_body DROP NOT NULL;
 
-INSERT INTO slugs (name, max_activations, expiration_type, is_default)
-VALUES ('default', 1, 'forever', TRUE)
+INSERT INTO slugs (name, max_activations, expiration_type, offline_enabled, offline_token_lifetime_seconds, is_default)
+VALUES ('default', 1, 'forever', FALSE, 86400, TRUE)
 ON CONFLICT (name) DO NOTHING;

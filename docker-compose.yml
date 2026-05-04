@@ -48,6 +48,8 @@ services:
       RATE_LIMIT_IP_TTL: 10m
       RATE_LIMIT_MAX_IP_ENTRIES: "10000"
       TRUST_PROXY_HEADERS: "false"
+      OFFLINE_SIGNING_ENCRYPTION_KEY: development_offline_signing_key_123456
+      OFFLINE_TOKEN_ISSUER: simple-license-server
     depends_on:
       postgres:
         condition: service_healthy

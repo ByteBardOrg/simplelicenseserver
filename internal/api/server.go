@@ -38,6 +38,7 @@ const (
 	maxMetadataDepth        = 5
 	maxMetadataNodes        = 512
 	maxAPIKeyNameLength     = 128
+	maxSigningKeyNameLength = 128
 	maxWebhookNameLength    = 128
 	maxWebhookURLLength     = 2048
 	maxSearchQueryLength    = 256
@@ -87,6 +88,9 @@ type Server struct {
 	rateLimiter            *ipRateLimiter
 	uiEnabled              bool
 	uiDistDir              string
+	offlineSigningKey      string
+	offlineTokenIssuer     string
+	offlineTokenAudience   string
 }
 
 type Options struct {
@@ -101,6 +105,9 @@ type Options struct {
 	RateLimitIPTTL        time.Duration
 	RateLimitMaxIPEntries int
 	TrustProxyHeaders     bool
+	OfflineSigningKey     string
+	OfflineTokenIssuer    string
+	OfflineTokenAudience  string
 }
 
 func DefaultOptions() Options {
@@ -116,6 +123,7 @@ func DefaultOptions() Options {
 		RateLimitIPTTL:        10 * time.Minute,
 		RateLimitMaxIPEntries: 10000,
 		TrustProxyHeaders:     false,
+		OfflineTokenIssuer:    "simple-license-server",
 	}
 }
 
@@ -130,7 +138,7 @@ type licenseService interface {
 	ActivateLicense(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error)
 	ValidateLicense(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error)
 	DeactivateLicense(ctx context.Context, licenseKey, fingerprint, reason string) (storage.DeactivationResult, error)
-	ListSlugs(ctx context.Context) ([]storage.SlugRecord, error)
+	ListSlugs(ctx context.Context, includeArchived bool) ([]storage.SlugRecord, error)
 	GetSlugByName(ctx context.Context, name string) (storage.SlugRecord, error)
 	CreateSlug(ctx context.Context, params storage.CreateSlugParams) (storage.SlugRecord, error)
 	UpdateSlugByName(ctx context.Context, name string, params storage.UpdateSlugParams) (storage.SlugRecord, error)
@@ -139,9 +147,16 @@ type licenseService interface {
 	CreateAPIKey(ctx context.Context, params storage.CreateAPIKeyParams) (storage.CreatedAPIKey, error)
 	RevokeAPIKey(ctx context.Context, id int64) (storage.APIKeyRecord, error)
 	ListWebhookEndpoints(ctx context.Context) ([]storage.WebhookEndpoint, error)
+	ListWebhookDeliveries(ctx context.Context, limit int) ([]storage.WebhookDeliveryLog, error)
 	CreateWebhookEndpoint(ctx context.Context, params storage.CreateWebhookEndpointParams) (storage.WebhookEndpoint, error)
 	UpdateWebhookEndpoint(ctx context.Context, id int64, params storage.UpdateWebhookEndpointParams) (storage.WebhookEndpoint, error)
 	DeleteWebhookEndpoint(ctx context.Context, id int64) error
+	ListSigningKeys(ctx context.Context) ([]storage.SigningKeyRecord, error)
+	ListPublicSigningKeys(ctx context.Context) ([]storage.SigningKeyRecord, error)
+	GetActiveSigningKey(ctx context.Context) (storage.SigningKeyRecord, error)
+	CreateSigningKey(ctx context.Context, params storage.CreateSigningKeyParams) (storage.SigningKeyRecord, error)
+	ActivateSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
+	RetireSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
 }
 
 func NewServer(service licenseService, logger *slog.Logger, managementAPIKeys map[string]struct{}, requestTimeout time.Duration) *Server {
@@ -182,6 +197,9 @@ func NewServerWithOptions(service licenseService, logger *slog.Logger, managemen
 	if strings.TrimSpace(opts.UIDistDir) == "" {
 		opts.UIDistDir = DefaultOptions().UIDistDir
 	}
+	if strings.TrimSpace(opts.OfflineTokenIssuer) == "" {
+		opts.OfflineTokenIssuer = DefaultOptions().OfflineTokenIssuer
+	}
 
 	return &Server{
 		service:                service,
@@ -190,6 +208,9 @@ func NewServerWithOptions(service licenseService, logger *slog.Logger, managemen
 		requestTimeout:         opts.RequestTimeout,
 		uiEnabled:              opts.UIEnabled,
 		uiDistDir:              opts.UIDistDir,
+		offlineSigningKey:      strings.TrimSpace(opts.OfflineSigningKey),
+		offlineTokenIssuer:     strings.TrimSpace(opts.OfflineTokenIssuer),
+		offlineTokenAudience:   strings.TrimSpace(opts.OfflineTokenAudience),
 		rateLimiter: newIPRateLimiter(rateLimiterConfig{
 			enabled:           opts.RateLimitEnabled,
 			globalRPS:         opts.RateLimitGlobalRPS,
@@ -222,9 +243,15 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /management/api-keys/{id}/revoke", s.requireManagementKey(http.HandlerFunc(s.handleRevokeAPIKey)))
 	mux.Handle("GET /management/licenses", s.requireManagementKey(http.HandlerFunc(s.handleListLicenses)))
 	mux.Handle("GET /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleListWebhooks)))
+	mux.Handle("GET /management/webhooks/deliveries", s.requireManagementKey(http.HandlerFunc(s.handleListWebhookDeliveries)))
 	mux.Handle("POST /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleCreateWebhook)))
 	mux.Handle("PATCH /management/webhooks/{id}", s.requireManagementKey(http.HandlerFunc(s.handleUpdateWebhook)))
 	mux.Handle("DELETE /management/webhooks/{id}", s.requireManagementKey(http.HandlerFunc(s.handleDeleteWebhook)))
+	mux.Handle("GET /management/offline/signing-keys", s.requireManagementKey(http.HandlerFunc(s.handleListSigningKeys)))
+	mux.Handle("POST /management/offline/signing-keys", s.requireManagementKey(http.HandlerFunc(s.handleCreateSigningKey)))
+	mux.Handle("POST /management/offline/signing-keys/{id}/activate", s.requireManagementKey(http.HandlerFunc(s.handleActivateSigningKey)))
+	mux.Handle("POST /management/offline/signing-keys/{id}/retire", s.requireManagementKey(http.HandlerFunc(s.handleRetireSigningKey)))
+	mux.Handle("GET /management/offline/public-keys", s.requireManagementKey(http.HandlerFunc(s.handleListPublicSigningKeys)))
 
 	if s.uiEnabled {
 		s.registerUIRoutes(mux)

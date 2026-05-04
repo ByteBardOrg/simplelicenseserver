@@ -32,6 +32,16 @@ const glossaryRows = [
       "Device/app-instance identifier sent by your client to activate, validate, and deactivate."
   },
   {
+    term: "Offline token",
+    meaning:
+      "Short-lived JWT returned on valid activation/validation when the license slug has offline_enabled=true and an active signing key exists. Lifetime is set by the slug."
+  },
+  {
+    term: "Signing key",
+    meaning:
+      "Ed25519 key pair used to sign offline JWTs. The server stores encrypted private keys and exports public keys for clients."
+  },
+  {
     term: "License API",
     meaning:
       "License lifecycle endpoints. /generate and /revoke require a generated server API key; runtime routes are called by your app."
@@ -114,6 +124,7 @@ export default function ConceptsPage() {
         <ul>
           <li>Defines <code>max_activations</code> (seat limit).</li>
           <li>Defines expiration policy (<code>forever</code>, <code>duration</code>, or <code>fixed_date</code>).</li>
+          <li>Defines whether offline JWTs are issued with <code>offline_enabled</code> and how long they last with <code>offline_token_lifetime_hours</code>.</li>
           <li>Is resolved at generation time, then stored on the license record.</li>
           <li>Changing a slug later affects future licenses, not already-issued ones.</li>
         </ul>
@@ -122,6 +133,22 @@ export default function ConceptsPage() {
         </p>
         <p style={{ marginTop: "0.7rem" }}>
           Want a deeper view of naming rules and policy snapshots? See <Link href="/docs/concepts/slugs/">Slug concepts</Link>.
+        </p>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Offline licenses</h3>
+        <p>
+          Offline licenses are optional short-lived JWTs. They are controlled per slug and refreshed by valid online
+          validation calls.
+        </p>
+        <ul>
+          <li>All slugs default to offline disabled.</li>
+          <li><code>/activate</code> and <code>/validate</code> include <code>token</code> only when the slug allows offline use.</li>
+          <li>Clients verify tokens with exported public signing keys.</li>
+        </ul>
+        <p style={{ marginTop: "0.7rem" }}>
+          For signing key lifecycle, claims, and revocation tradeoffs, see <Link href="/docs/concepts/offline-licenses/">Offline license concepts</Link>.
         </p>
       </div>
 

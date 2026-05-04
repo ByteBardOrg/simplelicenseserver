@@ -35,6 +35,13 @@ export const docsIndex = [
     keywords: ["webhooks", "idempotency", "payload", "events", "concepts"]
   },
   {
+    href: "/docs/concepts/offline-licenses/",
+    title: "Offline License Concepts",
+    summary: "Per-slug offline JWTs, signing keys, token refresh, and public key export.",
+    icon: "bx-shield-quarter",
+    keywords: ["offline", "jwt", "signing keys", "ed25519", "public keys", "concepts"]
+  },
+  {
     href: "/docs/concepts/slugs/",
     title: "Slug Concepts",
     summary: "Slug naming rules, policy fields, and license snapshot behavior at generation time.",
@@ -65,9 +72,9 @@ export const docsIndex = [
   {
     href: "/docs/management-api/",
     title: "Management API",
-    summary: "Management endpoints for license listing, slugs, API keys, and webhook configuration.",
+    summary: "Management endpoints for license listing, slugs, API keys, webhooks, and offline signing keys.",
     icon: "bx-wrench",
-    keywords: ["management api", "slugs", "api keys", "webhooks", "events"]
+    keywords: ["management api", "slugs", "api keys", "webhooks", "events", "offline", "signing keys"]
   },
   {
     href: "/docs/api/management-licenses-list/",
@@ -107,7 +114,7 @@ export const docsIndex = [
   {
     href: "/docs/api/management-slugs-delete/",
     title: "DELETE /management/slugs/{name}",
-    summary: "Delete a slug policy template.",
+    summary: "Archive a slug policy template (soft delete).",
     icon: "bx-trash",
     keywords: ["management api", "slugs", "delete"]
   },
@@ -124,6 +131,13 @@ export const docsIndex = [
     summary: "Breaking changes and migration checklist for 0.2.0.",
     icon: "bx-git-compare",
     keywords: ["0.2.0", "0.1.0", "migration", "breaking changes"]
+  },
+  {
+    href: "/docs/migration/0-2-0-to-0-3-0/",
+    title: "0.2.0 -> 0.3.0",
+    summary: "Additive upgrade notes for the bundled UI, license registry, and webhook run log.",
+    icon: "bx-git-compare",
+    keywords: ["0.3.0", "0.2.0", "migration", "ui", "webhooks", "licenses"]
   },
   {
     href: "/docs/api/generate/",
@@ -189,6 +203,13 @@ export const docsIndex = [
     keywords: ["management api", "webhooks", "list"]
   },
   {
+    href: "/docs/api/management-webhooks-deliveries/",
+    title: "GET /management/webhooks/deliveries",
+    summary: "List recent webhook delivery runs.",
+    icon: "bx-list-check",
+    keywords: ["management api", "webhooks", "deliveries", "run log"]
+  },
+  {
     href: "/docs/api/management-webhooks-create/",
     title: "POST /management/webhooks",
     summary: "Create a webhook endpoint configuration.",
@@ -208,5 +229,40 @@ export const docsIndex = [
     summary: "Delete a webhook endpoint.",
     icon: "bx-trash",
     keywords: ["management api", "webhooks", "delete"]
+  },
+  {
+    href: "/docs/api/management-offline-signing-keys-list/",
+    title: "GET /management/offline/signing-keys",
+    summary: "List offline JWT signing keys.",
+    icon: "bx-list-ul",
+    keywords: ["management api", "offline", "signing keys", "list"]
+  },
+  {
+    href: "/docs/api/management-offline-signing-keys-create/",
+    title: "POST /management/offline/signing-keys",
+    summary: "Create an Ed25519 signing key pair.",
+    icon: "bx-key",
+    keywords: ["management api", "offline", "signing keys", "create", "ed25519"]
+  },
+  {
+    href: "/docs/api/management-offline-signing-keys-activate/",
+    title: "POST /management/offline/signing-keys/{id}/activate",
+    summary: "Activate a signing key for new offline tokens.",
+    icon: "bx-check-shield",
+    keywords: ["management api", "offline", "signing keys", "activate"]
+  },
+  {
+    href: "/docs/api/management-offline-signing-keys-retire/",
+    title: "POST /management/offline/signing-keys/{id}/retire",
+    summary: "Retire an offline signing key.",
+    icon: "bx-key-minus",
+    keywords: ["management api", "offline", "signing keys", "retire"]
+  },
+  {
+    href: "/docs/api/management-offline-public-keys-list/",
+    title: "GET /management/offline/public-keys",
+    summary: "Export public keys for offline JWT verification.",
+    icon: "bx-export",
+    keywords: ["management api", "offline", "public keys", "export", "jwt"]
   }
 ];

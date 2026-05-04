@@ -30,7 +30,7 @@ managementApi.interceptors.request.use((config) => {
 })
 
 export const slugAPI = {
-  list: () => managementApi.get('/slugs'),
+  list: (params: { include_archived?: boolean } = {}) => managementApi.get('/slugs', { params }),
   get: (name: string) => managementApi.get(`/slugs/${encodeURIComponent(name)}`),
   create: (data: {
     name: string
@@ -38,6 +38,8 @@ export const slugAPI = {
     expiration_type: string
     expiration_days?: number
     fixed_expires_at?: string
+    offline_enabled?: boolean
+    offline_token_lifetime_hours?: number
   }) => managementApi.post('/slugs', data),
   update: (
     name: string,
@@ -47,6 +49,8 @@ export const slugAPI = {
       expiration_type: string
       expiration_days: number
       fixed_expires_at: string
+      offline_enabled: boolean
+      offline_token_lifetime_hours: number
     }>,
   ) => managementApi.patch(`/slugs/${encodeURIComponent(name)}`, data),
   delete: (name: string) => managementApi.delete(`/slugs/${encodeURIComponent(name)}`),
@@ -66,12 +70,21 @@ export const licensesAPI = {
 
 export const webhooksAPI = {
   list: () => managementApi.get('/webhooks'),
+  deliveries: (limit = 25) => managementApi.get('/webhooks/deliveries', { params: { limit } }),
   create: (data: { name: string; url: string; events: string[]; enabled: boolean }) => managementApi.post('/webhooks', data),
   update: (
     id: number,
     data: Partial<{ name: string; url: string; events: string[]; enabled: boolean }>,
   ) => managementApi.patch(`/webhooks/${id}`, data),
   delete: (id: number) => managementApi.delete(`/webhooks/${id}`),
+}
+
+export const offlineAPI = {
+  signingKeys: () => managementApi.get('/offline/signing-keys'),
+  publicKeys: () => managementApi.get('/offline/public-keys'),
+  createSigningKey: (name: string) => managementApi.post('/offline/signing-keys', { name }),
+  activateSigningKey: (id: number) => managementApi.post(`/offline/signing-keys/${id}/activate`),
+  retireSigningKey: (id: number) => managementApi.post(`/offline/signing-keys/${id}/retire`),
 }
 
 export const runtimeAPI = {

@@ -261,11 +261,25 @@ const formatDate = (value) => {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
 }
 
+const formatDateTime = (value) => {
+  if (!value) return 'Never'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Never'
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
+}
+
 const formatExpirationPolicy = (slug) => {
   if (!slug) return 'Select a slug'
   if (slug.expiration_type === 'duration') return `${slug.expiration_days} days after generation`
   if (slug.expiration_type === 'fixed_date') return formatDate(slug.fixed_expires_at)
   return 'Never expires'
+}
+
+const formatOfflineLifetime = (hours) => {
+  const value = Number(hours || 0)
+  if (value <= 0) return 'Not set'
+  if (value % 24 === 0) return `${value / 24}d`
+  return `${value}h`
 }
 
 const statusClass = (status) => {
@@ -488,6 +502,14 @@ onUnmounted(() => {
                   <span class="text-right font-semibold text-white">{{ formatExpirationPolicy(selectedSlug) }}</span>
                 </div>
                 <div class="flex items-center justify-between gap-4">
+                  <span class="text-[#8f98ad]">Offline JWTs</span>
+                  <span class="font-semibold text-white">{{ selectedSlug.offline_enabled ? 'Enabled' : 'Disabled' }}</span>
+                </div>
+                <div v-if="selectedSlug.offline_enabled" class="flex items-center justify-between gap-4">
+                  <span class="text-[#8f98ad]">Token TTL</span>
+                  <span class="font-semibold text-white">{{ formatOfflineLifetime(selectedSlug.offline_token_lifetime_hours) }}</span>
+                </div>
+                <div class="flex items-center justify-between gap-4">
                   <span class="text-[#8f98ad]">Slug type</span>
                   <span class="font-semibold text-white">{{ selectedSlug.is_default ? 'Default' : 'Custom' }}</span>
                 </div>
@@ -534,6 +556,10 @@ onUnmounted(() => {
           <div class="rounded-md bg-[#1c1f2a] p-3">
             <p class="metadata-label text-[0.65rem] text-[#8f98ad]">Created</p>
             <p class="mt-2 text-sm text-white">{{ formatDate(selectedLicense.created_at) }}</p>
+          </div>
+          <div class="rounded-md bg-[#1c1f2a] p-3">
+            <p class="metadata-label text-[0.65rem] text-[#8f98ad]">Last Validated</p>
+            <p class="mt-2 text-sm text-white">{{ formatDateTime(selectedLicense.last_validated_at) }}</p>
           </div>
           <div class="rounded-md bg-[#1c1f2a] p-3">
             <p class="metadata-label text-[0.65rem] text-[#8f98ad]">Expires</p>

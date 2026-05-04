@@ -34,9 +34,20 @@ export default function ManagementApiPage() {
       title: "Webhook Management",
       endpointKeys: [
         "management-webhooks-list",
+        "management-webhooks-deliveries",
         "management-webhooks-create",
         "management-webhooks-update",
         "management-webhooks-delete"
+      ]
+    },
+    {
+      title: "Offline License Signing",
+      endpointKeys: [
+        "management-offline-signing-keys-list",
+        "management-offline-signing-keys-create",
+        "management-offline-signing-keys-activate",
+        "management-offline-signing-keys-retire",
+        "management-offline-public-keys-list"
       ]
     }
   ];
@@ -48,8 +59,8 @@ export default function ManagementApiPage() {
       <p className="eyebrow">API Reference</p>
       <h1>Management API</h1>
       <p>
-        These routes are for internal tooling: license inspection, slug policies, generated server API keys, and webhook
-        endpoint configuration. License generation and revocation stay on <code>/generate</code> and <code>/revoke</code>.
+        These routes are for internal tooling: license inspection, slug policies, generated server API keys, webhook
+        endpoint configuration/logs, and offline license signing keys. License generation and revocation stay on <code>/generate</code> and <code>/revoke</code>.
       </p>
 
       {managementConceptSections.map((section) => {

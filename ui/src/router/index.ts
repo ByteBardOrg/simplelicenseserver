@@ -32,6 +32,12 @@ const router = createRouter({
       component: () => import('@/views/WebhooksView.vue'),
       meta: { title: 'Webhooks' },
     },
+    {
+      path: '/offline-licenses',
+      name: 'offline-licenses',
+      component: () => import('@/views/OfflineLicensesView.vue'),
+      meta: { title: 'Offline Licenses' },
+    },
   ],
 })
 

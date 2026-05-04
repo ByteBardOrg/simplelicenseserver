@@ -17,6 +17,7 @@ const pages = [
   { name: 'Slugs', path: '/slugs' },
   { name: 'API Keys', path: '/api-keys' },
   { name: 'Webhooks', path: '/webhooks' },
+  { name: 'Offline Licenses', path: '/offline-licenses' },
 ]
 
 const isActive = (pageName) => props.activePage === pageName

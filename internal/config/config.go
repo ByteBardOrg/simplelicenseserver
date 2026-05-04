@@ -26,6 +26,9 @@ type Config struct {
 	RateLimitIPTTL        time.Duration
 	RateLimitMaxIPEntries int
 	TrustProxyHeaders     bool
+	OfflineSigningKey     string
+	OfflineTokenIssuer    string
+	OfflineTokenAudience  string
 }
 
 func Load() (Config, error) {
@@ -46,6 +49,7 @@ func Load() (Config, error) {
 		RateLimitIPTTL:        10 * time.Minute,
 		RateLimitMaxIPEntries: 10000,
 		TrustProxyHeaders:     false,
+		OfflineTokenIssuer:    "simple-license-server",
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -163,6 +167,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+
+	cfg.OfflineSigningKey = strings.TrimSpace(os.Getenv("OFFLINE_SIGNING_ENCRYPTION_KEY"))
+	cfg.OfflineTokenIssuer = strings.TrimSpace(getEnv("OFFLINE_TOKEN_ISSUER", cfg.OfflineTokenIssuer))
+	cfg.OfflineTokenAudience = strings.TrimSpace(os.Getenv("OFFLINE_TOKEN_AUDIENCE"))
 
 	if cfg.RateLimitEnabled {
 		if cfg.RateLimitGlobalRPS <= 0 || cfg.RateLimitPerIPRPS <= 0 {

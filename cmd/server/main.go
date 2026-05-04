@@ -46,6 +46,9 @@ func main() {
 		RateLimitIPTTL:        cfg.RateLimitIPTTL,
 		RateLimitMaxIPEntries: cfg.RateLimitMaxIPEntries,
 		TrustProxyHeaders:     cfg.TrustProxyHeaders,
+		OfflineSigningKey:     cfg.OfflineSigningKey,
+		OfflineTokenIssuer:    cfg.OfflineTokenIssuer,
+		OfflineTokenAudience:  cfg.OfflineTokenAudience,
 	})
 
 	dispatcher := webhook.NewDispatcher(store, logger, webhook.DefaultOptions())

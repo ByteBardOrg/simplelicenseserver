@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"simple-license-server/internal/offlinejwt"
 	"simple-license-server/internal/storage"
 )
 
@@ -28,7 +29,7 @@ type stubService struct {
 	activateLicenseFn          func(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error)
 	validateLicenseFn          func(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error)
 	deactivateLicenseFn        func(ctx context.Context, licenseKey, fingerprint, reason string) (storage.DeactivationResult, error)
-	listSlugsFn                func(ctx context.Context) ([]storage.SlugRecord, error)
+	listSlugsFn                func(ctx context.Context, includeArchived bool) ([]storage.SlugRecord, error)
 	getSlugByNameFn            func(ctx context.Context, name string) (storage.SlugRecord, error)
 	createSlugFn               func(ctx context.Context, params storage.CreateSlugParams) (storage.SlugRecord, error)
 	updateSlugByNameFn         func(ctx context.Context, name string, params storage.UpdateSlugParams) (storage.SlugRecord, error)
@@ -37,9 +38,16 @@ type stubService struct {
 	createAPIKeyFn             func(ctx context.Context, params storage.CreateAPIKeyParams) (storage.CreatedAPIKey, error)
 	revokeAPIKeyFn             func(ctx context.Context, id int64) (storage.APIKeyRecord, error)
 	listWebhooksFn             func(ctx context.Context) ([]storage.WebhookEndpoint, error)
+	listWebhookDeliveriesFn    func(ctx context.Context, limit int) ([]storage.WebhookDeliveryLog, error)
 	createWebhookFn            func(ctx context.Context, params storage.CreateWebhookEndpointParams) (storage.WebhookEndpoint, error)
 	updateWebhookFn            func(ctx context.Context, id int64, params storage.UpdateWebhookEndpointParams) (storage.WebhookEndpoint, error)
 	deleteWebhookFn            func(ctx context.Context, id int64) error
+	listSigningKeysFn          func(ctx context.Context) ([]storage.SigningKeyRecord, error)
+	listPublicSigningKeysFn    func(ctx context.Context) ([]storage.SigningKeyRecord, error)
+	getActiveSigningKeyFn      func(ctx context.Context) (storage.SigningKeyRecord, error)
+	createSigningKeyFn         func(ctx context.Context, params storage.CreateSigningKeyParams) (storage.SigningKeyRecord, error)
+	activateSigningKeyFn       func(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
+	retireSigningKeyFn         func(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
 }
 
 func (s stubService) EnqueueWebhookEvent(ctx context.Context, eventType string, payload map[string]any) error {
@@ -113,9 +121,9 @@ func (s stubService) DeactivateLicense(ctx context.Context, licenseKey, fingerpr
 	return storage.DeactivationResult{}, nil
 }
 
-func (s stubService) ListSlugs(ctx context.Context) ([]storage.SlugRecord, error) {
+func (s stubService) ListSlugs(ctx context.Context, includeArchived bool) ([]storage.SlugRecord, error) {
 	if s.listSlugsFn != nil {
-		return s.listSlugsFn(ctx)
+		return s.listSlugsFn(ctx, includeArchived)
 	}
 	return []storage.SlugRecord{}, nil
 }
@@ -176,6 +184,13 @@ func (s stubService) ListWebhookEndpoints(ctx context.Context) ([]storage.Webhoo
 	return []storage.WebhookEndpoint{}, nil
 }
 
+func (s stubService) ListWebhookDeliveries(ctx context.Context, limit int) ([]storage.WebhookDeliveryLog, error) {
+	if s.listWebhookDeliveriesFn != nil {
+		return s.listWebhookDeliveriesFn(ctx, limit)
+	}
+	return []storage.WebhookDeliveryLog{}, nil
+}
+
 func (s stubService) CreateWebhookEndpoint(ctx context.Context, params storage.CreateWebhookEndpointParams) (storage.WebhookEndpoint, error) {
 	if s.createWebhookFn != nil {
 		return s.createWebhookFn(ctx, params)
@@ -195,6 +210,48 @@ func (s stubService) DeleteWebhookEndpoint(ctx context.Context, id int64) error 
 		return s.deleteWebhookFn(ctx, id)
 	}
 	return nil
+}
+
+func (s stubService) ListSigningKeys(ctx context.Context) ([]storage.SigningKeyRecord, error) {
+	if s.listSigningKeysFn != nil {
+		return s.listSigningKeysFn(ctx)
+	}
+	return []storage.SigningKeyRecord{}, nil
+}
+
+func (s stubService) ListPublicSigningKeys(ctx context.Context) ([]storage.SigningKeyRecord, error) {
+	if s.listPublicSigningKeysFn != nil {
+		return s.listPublicSigningKeysFn(ctx)
+	}
+	return []storage.SigningKeyRecord{}, nil
+}
+
+func (s stubService) GetActiveSigningKey(ctx context.Context) (storage.SigningKeyRecord, error) {
+	if s.getActiveSigningKeyFn != nil {
+		return s.getActiveSigningKeyFn(ctx)
+	}
+	return storage.SigningKeyRecord{}, storage.ErrNotFound
+}
+
+func (s stubService) CreateSigningKey(ctx context.Context, params storage.CreateSigningKeyParams) (storage.SigningKeyRecord, error) {
+	if s.createSigningKeyFn != nil {
+		return s.createSigningKeyFn(ctx, params)
+	}
+	return storage.SigningKeyRecord{}, nil
+}
+
+func (s stubService) ActivateSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error) {
+	if s.activateSigningKeyFn != nil {
+		return s.activateSigningKeyFn(ctx, id)
+	}
+	return storage.SigningKeyRecord{}, nil
+}
+
+func (s stubService) RetireSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error) {
+	if s.retireSigningKeyFn != nil {
+		return s.retireSigningKeyFn(ctx, id)
+	}
+	return storage.SigningKeyRecord{}, nil
 }
 
 func TestGenerateRequiresServerKey(t *testing.T) {
@@ -324,6 +381,66 @@ func TestRevokeAcceptsManagementKeyForProvisioning(t *testing.T) {
 	}
 }
 
+func TestValidateRefreshesOfflineTokenWhenSlugAllowsOffline(t *testing.T) {
+	secret := "test_offline_signing_secret_32_chars"
+	keyPair, err := offlinejwt.GenerateEd25519KeyPair()
+	if err != nil {
+		t.Fatalf("generate key pair: %v", err)
+	}
+	encryptedPrivateKey, err := offlinejwt.EncryptPrivateKey(keyPair.PrivatePEM, secret)
+	if err != nil {
+		t.Fatalf("encrypt private key: %v", err)
+	}
+
+	s := NewServerWithOptions(stubService{
+		validateLicenseFn: func(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error) {
+			return storage.ValidationResult{
+				Valid:                       true,
+				Status:                      "active",
+				LicenseID:                   "8c50f4f7-761d-4bf1-8e09-27a5f7ea0a12",
+				Slug:                        "default",
+				OfflineEnabled:              true,
+				OfflineTokenLifetimeSeconds: 86400,
+			}, nil
+		},
+		getActiveSigningKeyFn: func(ctx context.Context) (storage.SigningKeyRecord, error) {
+			return storage.SigningKeyRecord{
+				Kid:                 keyPair.Kid,
+				Algorithm:           keyPair.Algorithm,
+				Status:              "active",
+				PrivateKeyEncrypted: encryptedPrivateKey,
+				PublicKeyPEM:        keyPair.PublicPEM,
+			}, nil
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, Options{
+		RequestTimeout:     15 * time.Second,
+		RateLimitEnabled:   false,
+		OfflineSigningKey:  secret,
+		OfflineTokenIssuer: "test-issuer",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/validate", strings.NewReader(`{"license_key":"LNC-8821-X99B-4421","fingerprint":"device-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var response validateResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Token == "" {
+		t.Fatalf("expected refreshed offline token")
+	}
+	if strings.Count(response.Token, ".") != 2 {
+		t.Fatalf("expected JWT-shaped token, got %q", response.Token)
+	}
+}
+
 func TestManagementEndpointRequiresManagementKey(t *testing.T) {
 	s := NewServer(stubService{}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
 
@@ -413,6 +530,50 @@ func TestListLicensesRejectsInvalidStatus(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestListWebhookDeliveriesUsesLimit(t *testing.T) {
+	now := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
+	statusCode := 500
+	lastError := "webhook responded with status 500"
+	var gotLimit int
+	s := NewServer(stubService{
+		listWebhookDeliveriesFn: func(ctx context.Context, limit int) ([]storage.WebhookDeliveryLog, error) {
+			gotLimit = limit
+			return []storage.WebhookDeliveryLog{
+				{
+					ID:                 42,
+					EndpointID:         7,
+					EndpointName:       "audit-sync",
+					EndpointURL:        "https://example.com/hooks/license",
+					EventType:          "license.generated",
+					Status:             "failed",
+					Attempts:           3,
+					LastResponseStatus: &statusCode,
+					LastError:          &lastError,
+					NextAttemptAt:      now,
+					CreatedAt:          now,
+					UpdatedAt:          now,
+				},
+			}, nil
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
+
+	req := httptest.NewRequest(http.MethodGet, "/management/webhooks/deliveries?limit=5", nil)
+	req.Header.Set("Authorization", "Bearer management_key_dev_123456")
+	rr := httptest.NewRecorder()
+
+	s.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if gotLimit != 5 {
+		t.Fatalf("expected limit 5, got %d", gotLimit)
+	}
+	if !strings.Contains(rr.Body.String(), "audit-sync") || !strings.Contains(rr.Body.String(), "license.generated") {
+		t.Fatalf("expected delivery log payload, got %s", rr.Body.String())
 	}
 }
 

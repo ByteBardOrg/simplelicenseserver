@@ -20,8 +20,9 @@ const supportLinks = [
 ];
 
 const conceptLinks = [
-  { href: "/docs/concepts/slugs/", title: "Slug Concepts" },
-  { href: "/docs/concepts/webhooks/", title: "Webhook Concepts" }
+  { href: "/docs/concepts/slugs/", title: "Slugs" },
+  { href: "/docs/concepts/webhooks/", title: "Webhooks" },
+  { href: "/docs/concepts/offline-licenses/", title: "Offline Licenses" }
 ];
 
 export default function DocsSidebar() {
@@ -36,7 +37,7 @@ export default function DocsSidebar() {
   const isApiReferenceSection =
     pathname === "/docs/api/" || pathname === "/docs/management-api/" || isLicenseEndpointPath || isManagementEndpointPath;
 
-  const isConceptsSection = pathname === "/docs/concepts/" || pathname === "/docs/concepts/slugs/" || pathname === "/docs/concepts/webhooks/";
+  const isConceptsSection = pathname.startsWith("/docs/concepts/");
 
   const [openHeader, setOpenHeader] = useState(null);
 

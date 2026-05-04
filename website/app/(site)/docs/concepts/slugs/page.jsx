@@ -15,7 +15,9 @@ const slugPolicyExample = `{
   "max_activations": 3,
   "expiration_type": "duration",
   "expiration_days": 365,
-  "fixed_expires_at": null
+  "fixed_expires_at": null,
+  "offline_enabled": false,
+  "offline_token_lifetime_hours": 24
 }`;
 
 const generatedFromSlugExample = `{
@@ -50,7 +52,24 @@ export default function SlugConceptsPage() {
             Optional policy fields: <code>expiration_days</code> for <code>duration</code>, or
             <code> fixed_expires_at</code> for <code>fixed_date</code>.
           </li>
+          <li>
+            <code>offline_enabled</code>: whether valid activation/validation responses can include offline JWTs.
+          </li>
+          <li>
+            <code>offline_token_lifetime_hours</code>: maximum lifetime for issued/refreshed offline JWTs.
+          </li>
         </ul>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Offline policy</h3>
+        <p>
+          Offline JWT issuance and token lifetime are slug-level policy. All slugs, including <code>default</code>, default to
+          <code> offline_enabled=false</code> and <code>offline_token_lifetime_hours=24</code>. Turn offline on only for products where offline validation is acceptable.
+        </p>
+        <p style={{ marginTop: "0.7rem" }}>
+          For token refresh, signing keys, and public key export, see <Link href="/docs/concepts/offline-licenses/">Offline license concepts</Link>.
+        </p>
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>

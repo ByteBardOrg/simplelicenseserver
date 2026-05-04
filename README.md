@@ -29,6 +29,11 @@ Management API:
 - `POST /management/webhooks`
 - `PATCH /management/webhooks/{id}`
 - `DELETE /management/webhooks/{id}`
+- `GET /management/offline/signing-keys`
+- `POST /management/offline/signing-keys`
+- `POST /management/offline/signing-keys/{id}/activate`
+- `POST /management/offline/signing-keys/{id}/retire`
+- `GET /management/offline/public-keys`
 
 `POST /generate` supports idempotency via the `Idempotency-Key` request header.
 
@@ -107,6 +112,16 @@ Rate limiting defaults:
 - `RATE_LIMIT_IP_TTL` (default `10m`)
 - `RATE_LIMIT_MAX_IP_ENTRIES` (default `10000`)
 - `TRUST_PROXY_HEADERS` (default `false`)
+
+Offline token defaults:
+
+- Offline JWT issuance is controlled per slug with `offline_enabled` and `offline_token_lifetime_hours`.
+- All slugs, including the seeded `default` slug, default to offline disabled.
+- `POST /activate` and valid `POST /validate` responses include `token` only when the license slug has offline enabled and an active signing key exists.
+- `OFFLINE_SIGNING_ENCRYPTION_KEY` encrypts signing private keys at rest and must be at least 32 characters before creating or using signing keys.
+- `OFFLINE_TOKEN_ISSUER` defaults to `simple-license-server`.
+- `OFFLINE_TOKEN_AUDIENCE` is optional.
+- Slug `offline_token_lifetime_hours` defaults to `24`.
 
 Additional API security behavior:
 

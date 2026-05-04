@@ -21,9 +21,9 @@ export const apiEndpointGroups = {
     key: "management",
     title: "Management API",
     summary:
-      "Operator-facing routes for license inspection, slug policy management, API key lifecycle, and webhook endpoint configuration.",
+      "Operator-facing routes for license inspection, slug policy management, API key lifecycle, webhook endpoint configuration/logs, and offline signing keys.",
     description:
-      "Use these endpoints from internal tooling or your frontend backend to inspect licenses, manage slug policy templates, provisioning API keys, and webhook endpoint configuration. Management routes require the management bootstrap key configured via MANAGEMENT_API_KEYS or MANAGEMENT_API_KEY.",
+      "Use these endpoints from internal tooling or your frontend backend to inspect licenses, manage slug policy templates, provisioning API keys, webhook endpoint configuration/logs, and offline JWT signing keys. Management routes require the management bootstrap key configured via MANAGEMENT_API_KEYS or MANAGEMENT_API_KEY.",
     endpoints: [
       "management-licenses-list",
       "management-slugs-list",
@@ -35,14 +35,226 @@ export const apiEndpointGroups = {
       "management-api-keys-create",
       "management-api-keys-revoke",
       "management-webhooks-list",
+      "management-webhooks-deliveries",
       "management-webhooks-create",
       "management-webhooks-update",
-      "management-webhooks-delete"
+      "management-webhooks-delete",
+      "management-offline-signing-keys-list",
+      "management-offline-signing-keys-create",
+      "management-offline-signing-keys-activate",
+      "management-offline-signing-keys-retire",
+      "management-offline-public-keys-list"
     ]
   }
 };
 
 export const apiEndpoints = {
+  "management-offline-signing-keys-list": {
+    key: "management-offline-signing-keys-list",
+    group: "management",
+    label: "GET /management/offline/signing-keys",
+    method: "GET",
+    path: "/management/offline/signing-keys",
+    title: "List Offline Signing Keys",
+    summary: "List offline JWT signing keys and their lifecycle state.",
+    details: [
+      "Requires management API key auth.",
+      "Private key material is never returned.",
+      "Use this endpoint for the Offline Licenses management UI and operator audits."
+    ],
+    curl: `curl -sS http://localhost:8080/management/offline/signing-keys \
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `{
+  "signing_keys": [
+    {
+      "id": 1,
+      "name": "desktop-app-2026",
+      "kid": "61426d843cf40341f68a3053",
+      "algorithm": "Ed25519",
+      "status": "active",
+      "created_at": "2026-04-21T12:00:00Z",
+      "activated_at": "2026-04-21T12:05:00Z",
+      "retired_at": null
+    }
+  ]
+}`,
+    responseFields: [
+      { name: "signing_keys", type: "array", description: "Signing key metadata records." },
+      { name: "signing_keys[].kid", type: "string", description: "JWT key id emitted in the token header." },
+      { name: "signing_keys[].algorithm", type: '"Ed25519"', description: "Signing algorithm for this key." },
+      { name: "signing_keys[].status", type: '"active" | "verify_only" | "retired"', description: "Lifecycle state. Only active signs new tokens." }
+    ],
+    errorCodes: [
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-offline-signing-keys-create": {
+    key: "management-offline-signing-keys-create",
+    group: "management",
+    label: "POST /management/offline/signing-keys",
+    method: "POST",
+    path: "/management/offline/signing-keys",
+    title: "Create Offline Signing Key",
+    summary: "Generate a new Ed25519 key pair for offline JWT signing.",
+    details: [
+      "Requires management API key auth.",
+      "Requires OFFLINE_SIGNING_ENCRYPTION_KEY to be configured with at least 32 characters.",
+      "New keys start in verify_only mode until activated.",
+      "The encrypted private key is stored server-side; public key material is returned for export."
+    ],
+    curl: `curl -sS http://localhost:8080/management/offline/signing-keys \
+  -H "Authorization: Bearer management_key_dev_123456" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "desktop-app-2026"
+  }'`,
+    requestBody: `{
+  "name": "desktop-app-2026"
+}`,
+    responseBody: `{
+  "id": 1,
+  "name": "desktop-app-2026",
+  "kid": "61426d843cf40341f68a3053",
+  "algorithm": "Ed25519",
+  "status": "verify_only",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+  "created_at": "2026-04-21T12:00:00Z",
+  "activated_at": null,
+  "retired_at": null
+}`,
+    responseFields: [
+      { name: "id", type: "number", description: "Signing key id." },
+      { name: "kid", type: "string", description: "JWT key id for this key pair." },
+      { name: "public_key_pem", type: "string", description: "PEM public key to ship with offline-validating clients." },
+      { name: "status", type: '"verify_only"', description: "New keys do not sign tokens until activated." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid JSON, oversized name, or missing/invalid OFFLINE_SIGNING_ENCRYPTION_KEY." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 409, reason: "Generated key id conflict; retry the request." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-offline-signing-keys-activate": {
+    key: "management-offline-signing-keys-activate",
+    group: "management",
+    label: "POST /management/offline/signing-keys/{id}/activate",
+    method: "POST",
+    path: "/management/offline/signing-keys/{id}/activate",
+    title: "Activate Offline Signing Key",
+    summary: "Promote one signing key to active so it signs new offline JWTs.",
+    details: [
+      "Requires management API key auth.",
+      "Only one signing key can be active at a time.",
+      "The previously active key is moved to verify_only so older tokens can continue validating until retired."
+    ],
+    curl: `curl -sS -X POST http://localhost:8080/management/offline/signing-keys/1/activate \
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `{
+  "id": 1,
+  "name": "desktop-app-2026",
+  "kid": "61426d843cf40341f68a3053",
+  "algorithm": "Ed25519",
+  "status": "active",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+  "created_at": "2026-04-21T12:00:00Z",
+  "activated_at": "2026-04-21T12:05:00Z",
+  "retired_at": null
+}`,
+    responseFields: [
+      { name: "status", type: '"active"', description: "The key is now used for newly issued/refreshed offline JWTs." },
+      { name: "activated_at", type: "string", description: "RFC3339 timestamp when the key first became active." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid key id." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 404, reason: "Signing key not found." },
+      { status: 409, reason: "Retired signing key cannot be activated." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-offline-signing-keys-retire": {
+    key: "management-offline-signing-keys-retire",
+    group: "management",
+    label: "POST /management/offline/signing-keys/{id}/retire",
+    method: "POST",
+    path: "/management/offline/signing-keys/{id}/retire",
+    title: "Retire Offline Signing Key",
+    summary: "Retire a signing key so it is no longer exported as trusted verification material.",
+    details: [
+      "Requires management API key auth.",
+      "Retired keys do not sign new tokens and are omitted from public key exports.",
+      "Clients that remove the public key will reject existing offline tokens signed by that kid."
+    ],
+    curl: `curl -sS -X POST http://localhost:8080/management/offline/signing-keys/1/retire \
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `{
+  "id": 1,
+  "name": "desktop-app-2026",
+  "kid": "61426d843cf40341f68a3053",
+  "algorithm": "Ed25519",
+  "status": "retired",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+  "created_at": "2026-04-21T12:00:00Z",
+  "activated_at": "2026-04-21T12:05:00Z",
+  "retired_at": "2026-04-22T12:00:00Z"
+}`,
+    responseFields: [
+      { name: "status", type: '"retired"', description: "The key has been removed from active/verify-only trust." },
+      { name: "retired_at", type: "string", description: "RFC3339 timestamp when retirement was recorded." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid key id." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 404, reason: "Signing key not found." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-offline-public-keys-list": {
+    key: "management-offline-public-keys-list",
+    group: "management",
+    label: "GET /management/offline/public-keys",
+    method: "GET",
+    path: "/management/offline/public-keys",
+    title: "List Offline Public Keys",
+    summary: "Export active and verify-only public keys for offline-validating clients.",
+    details: [
+      "Requires management API key auth.",
+      "Returns only active and verify_only signing keys.",
+      "Ship this public verification material with client applications that validate offline JWTs."
+    ],
+    curl: `curl -sS http://localhost:8080/management/offline/public-keys \
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `{
+  "signing_keys": [
+    {
+      "id": 1,
+      "name": "desktop-app-2026",
+      "kid": "61426d843cf40341f68a3053",
+      "algorithm": "Ed25519",
+      "status": "active",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+      "created_at": "2026-04-21T12:00:00Z",
+      "activated_at": "2026-04-21T12:05:00Z",
+      "retired_at": null
+    }
+  ]
+}`,
+    responseFields: [
+      { name: "signing_keys", type: "array", description: "Active and verify-only public signing key records." },
+      { name: "signing_keys[].public_key_pem", type: "string", description: "PEM public key for JWT verification." },
+      { name: "signing_keys[].kid", type: "string", description: "JWT header kid this public key verifies." }
+    ],
+    errorCodes: [
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
   generate: {
     key: "generate",
     group: "license",
@@ -160,6 +372,7 @@ export const apiEndpoints = {
     details: [
       "Checks revoked/expired state and activation limits.",
       "Creates or confirms an activation for the fingerprint.",
+      "Returns token when activation is valid, the slug has offline_enabled=true, and an active signing key exists.",
       "Returns a non-valid status with reason when activation is denied."
     ],
     curl: `curl -X POST http://localhost:8080/activate \\
@@ -186,6 +399,7 @@ export const apiEndpoints = {
   "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
   "fingerprint": "abc123-machine-fingerprint",
   "expires_at": "2026-10-20T12:00:00Z",
+  "token": "jwt-if-slug-offline-enabled",
   "reason": ""
 }`,
     responseFields: [
@@ -201,6 +415,11 @@ export const apiEndpoints = {
         name: "expires_at",
         type: "string | null",
         description: "RFC3339 timestamp when the license expires, or null when it does not expire."
+      },
+      {
+        name: "token",
+        type: "string (optional)",
+        description: "Offline JWT issued only when activation is valid, the slug is offline-enabled, and an active signing key exists."
       },
       {
         name: "reason",
@@ -225,6 +444,7 @@ export const apiEndpoints = {
     details: [
       "Verifies license state and fingerprint binding.",
       "Returns status and expires_at for runtime decisions.",
+      "Refreshes token when validation is valid, the slug has offline_enabled=true, and an active signing key exists.",
       "Designed for repeated online validation heartbeats."
     ],
     curl: `curl -X POST http://localhost:8080/validate \\
@@ -241,6 +461,7 @@ export const apiEndpoints = {
   "valid": true,
   "status": "active",
   "expires_at": "2026-10-20T12:00:00Z",
+  "token": "refreshed-jwt-if-slug-offline-enabled",
   "reason": ""
 }`,
     responseFields: [
@@ -254,6 +475,11 @@ export const apiEndpoints = {
         name: "expires_at",
         type: "string | null",
         description: "RFC3339 timestamp when the license expires, or null for non-expiring licenses."
+      },
+      {
+        name: "token",
+        type: "string (optional)",
+        description: "Refreshed offline JWT returned only when validation is valid, the slug is offline-enabled, and an active signing key exists."
       },
       {
         name: "reason",
@@ -336,7 +562,8 @@ export const apiEndpoints = {
       "page defaults to 1; page_size defaults to 10 and is capped at 100.",
       "status may be inactive, active, revoked, or expired.",
       "q searches license key, slug name, and metadata text; max length is 256 characters.",
-      "active_seats is derived from active activation rows at request time."
+      "active_seats is derived from active activation rows at request time.",
+      "last_validated_at is the latest validation timestamp across this license's activations."
     ],
     curl: `curl -sS "http://localhost:8080/management/licenses?page=1&page_size=10&q=user@example.com&status=active" \
   -H "Authorization: Bearer management_key_dev_123456"`,
@@ -354,9 +581,12 @@ export const apiEndpoints = {
       },
       "max_activations": 3,
       "active_seats": 1,
+      "offline_enabled": true,
+      "offline_token_lifetime_hours": 24,
       "expires_at": "2026-10-20T12:00:00Z",
       "created_at": "2026-04-20T12:00:00Z",
       "activated_at": "2026-04-21T09:30:00Z",
+      "last_validated_at": "2026-04-21T10:45:00Z",
       "revoked_at": null
     }
   ],
@@ -383,9 +613,12 @@ export const apiEndpoints = {
       { name: "licenses[].metadata", type: "object", description: "Metadata stored on the license." },
       { name: "licenses[].max_activations", type: "number", description: "Seat limit snapshotted from the slug at generation time." },
       { name: "licenses[].active_seats", type: "number", description: "Current active activation count." },
+      { name: "licenses[].offline_enabled", type: "boolean", description: "Whether the license's slug currently allows offline token issuance." },
+      { name: "licenses[].offline_token_lifetime_hours", type: "number", description: "Current offline JWT lifetime configured on the license slug, in hours." },
       { name: "licenses[].expires_at", type: "string | null", description: "RFC3339 expiration timestamp, or null when the license does not expire." },
       { name: "licenses[].created_at", type: "string", description: "RFC3339 creation timestamp." },
       { name: "licenses[].activated_at", type: "string | null", description: "RFC3339 timestamp when the license first became active." },
+      { name: "licenses[].last_validated_at", type: "string | null", description: "Most recent activation validation timestamp for this license." },
       { name: "licenses[].revoked_at", type: "string | null", description: "RFC3339 timestamp when the license was revoked." },
       { name: "pagination", type: "object", description: "Current page, page_size, total result count, and total_pages." },
       { name: "counts", type: "object", description: "Aggregate counts for total, active, inactive, revoked, and expired licenses." }
@@ -406,7 +639,7 @@ export const apiEndpoints = {
     summary: "List configured slug policy templates used during license generation.",
     details: [
       "Requires management API key auth.",
-      "Returns slug records including expiration policy and default slug flag.",
+      "Returns slug records including expiration policy, offline policy, and default slug flag.",
       "Slug policies affect newly generated licenses and are snapshotted at issuance time."
     ],
     curl: `curl -sS http://localhost:8080/management/slugs \\
@@ -421,6 +654,8 @@ export const apiEndpoints = {
       "expiration_type": "forever",
       "expiration_days": null,
       "fixed_expires_at": null,
+      "offline_enabled": false,
+      "offline_token_lifetime_hours": 24,
       "is_default": true,
       "created_at": "2026-04-21T09:00:00Z",
       "updated_at": "2026-04-21T09:00:00Z"
@@ -428,7 +663,9 @@ export const apiEndpoints = {
   ]
 }`,
     responseFields: [
-      { name: "slugs", type: "array", description: "Slug policy records available for generation." }
+      { name: "slugs", type: "array", description: "Slug policy records available for generation." },
+      { name: "slugs[].offline_enabled", type: "boolean", description: "Whether licenses under this slug can receive offline JWTs." },
+      { name: "slugs[].offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." }
     ],
     errorCodes: [
       { status: 401, reason: "Missing or invalid management API key." },
@@ -446,7 +683,9 @@ export const apiEndpoints = {
     details: [
       "Requires management API key auth.",
       "Slug names must be lowercase URL-safe (a-z, 0-9, hyphen).",
-      "Expiration policy must be one of forever, duration, or fixed_date."
+      "Expiration policy must be one of forever, duration, or fixed_date.",
+      "offline_enabled defaults to false unless explicitly set.",
+      "offline_token_lifetime_hours defaults to 24 unless explicitly set."
     ],
     curl: `curl -sS http://localhost:8080/management/slugs \\
   -H "Authorization: Bearer management_key_dev_123456" \\
@@ -455,13 +694,17 @@ export const apiEndpoints = {
     "name": "pro-monthly",
     "max_activations": 3,
     "expiration_type": "duration",
-    "expiration_days": 30
+    "expiration_days": 30,
+    "offline_enabled": true,
+    "offline_token_lifetime_hours": 24
   }'`,
     requestBody: `{
   "name": "pro-monthly",
   "max_activations": 3,
   "expiration_type": "duration",
-  "expiration_days": 30
+  "expiration_days": 30,
+  "offline_enabled": true,
+  "offline_token_lifetime_hours": 24
 }`,
     responseBody: `{
   "id": 2,
@@ -470,6 +713,8 @@ export const apiEndpoints = {
   "expiration_type": "duration",
   "expiration_days": 30,
   "fixed_expires_at": null,
+  "offline_enabled": true,
+  "offline_token_lifetime_hours": 24,
   "is_default": false,
   "created_at": "2026-04-21T12:00:00Z",
   "updated_at": "2026-04-21T12:00:00Z"
@@ -481,6 +726,8 @@ export const apiEndpoints = {
       { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Expiration policy mode." },
       { name: "expiration_days", type: "number | null", description: "Required when expiration_type is duration." },
       { name: "fixed_expires_at", type: "string | null", description: "RFC3339 timestamp required when expiration_type is fixed_date." },
+      { name: "offline_enabled", type: "boolean", description: "Whether licenses under this slug can receive offline JWTs." },
+      { name: "offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." },
       { name: "is_default", type: "boolean", description: "True only for the default slug." },
       { name: "created_at", type: "string", description: "RFC3339 creation timestamp." },
       { name: "updated_at", type: "string", description: "RFC3339 update timestamp." }
@@ -515,6 +762,8 @@ export const apiEndpoints = {
   "expiration_type": "duration",
   "expiration_days": 30,
   "fixed_expires_at": null,
+  "offline_enabled": true,
+  "offline_token_lifetime_hours": 24,
   "is_default": false,
   "created_at": "2026-04-21T12:00:00Z",
   "updated_at": "2026-04-21T12:00:00Z"
@@ -522,7 +771,9 @@ export const apiEndpoints = {
     responseFields: [
       { name: "name", type: "string", description: "Slug key used by generation calls." },
       { name: "max_activations", type: "number", description: "Seat limit configured on this slug template." },
-      { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Expiration policy mode." }
+      { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Expiration policy mode." },
+      { name: "offline_enabled", type: "boolean", description: "Whether this slug issues offline JWTs on valid activation/validation." },
+      { name: "offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." }
     ],
     errorCodes: [
       { status: 400, reason: "Invalid slug name format in path." },
@@ -550,12 +801,16 @@ export const apiEndpoints = {
   -d '{
     "max_activations": 5,
     "expiration_type": "fixed_date",
-    "fixed_expires_at": "2027-01-01T00:00:00Z"
+    "fixed_expires_at": "2027-01-01T00:00:00Z",
+    "offline_enabled": true,
+    "offline_token_lifetime_hours": 48
   }'`,
     requestBody: `{
   "max_activations": 5,
   "expiration_type": "fixed_date",
-  "fixed_expires_at": "2027-01-01T00:00:00Z"
+  "fixed_expires_at": "2027-01-01T00:00:00Z",
+  "offline_enabled": true,
+  "offline_token_lifetime_hours": 48
 }`,
     responseBody: `{
   "id": 2,
@@ -564,6 +819,8 @@ export const apiEndpoints = {
   "expiration_type": "fixed_date",
   "expiration_days": null,
   "fixed_expires_at": "2027-01-01T00:00:00Z",
+  "offline_enabled": true,
+  "offline_token_lifetime_hours": 48,
   "is_default": false,
   "created_at": "2026-04-21T12:00:00Z",
   "updated_at": "2026-04-21T12:30:00Z"
@@ -571,7 +828,9 @@ export const apiEndpoints = {
     responseFields: [
       { name: "updated_at", type: "string", description: "RFC3339 timestamp after update." },
       { name: "max_activations", type: "number", description: "Updated seat limit for future generations." },
-      { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Updated expiration policy mode." }
+      { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Updated expiration policy mode." },
+      { name: "offline_enabled", type: "boolean", description: "Updated offline JWT policy for this slug." },
+      { name: "offline_token_lifetime_hours", type: "number", description: "Updated offline JWT lifetime for this slug, in hours." }
     ],
     errorCodes: [
       { status: 400, reason: "Invalid path slug, invalid body, missing patch fields, or invalid expiration policy values." },
@@ -588,11 +847,12 @@ export const apiEndpoints = {
     method: "DELETE",
     path: "/management/slugs/{name}",
     title: "Delete Slug",
-    summary: "Delete a slug policy template when it is safe to remove.",
+    summary: "Archive a slug policy template when it is safe to remove.",
     details: [
       "Requires management API key auth.",
       "Default slug cannot be deleted.",
-      "Slugs with existing licenses cannot be deleted."
+      "Deletion is a soft delete: archived slugs are hidden from active usage and listing.",
+      "Slugs with non-revoked, non-expired licenses cannot be deleted."
     ],
     curl: `curl -sS -X DELETE http://localhost:8080/management/slugs/legacy-beta \\
   -H "Authorization: Bearer management_key_dev_123456"`,
@@ -607,7 +867,7 @@ export const apiEndpoints = {
       { status: 400, reason: "Invalid slug name format in path." },
       { status: 401, reason: "Missing or invalid management API key." },
       { status: 404, reason: "Slug not found." },
-      { status: 409, reason: "Slug cannot be deleted (default or in-use)." },
+      { status: 409, reason: "Slug cannot be deleted (default or has non-revoked, non-expired licenses)." },
       { status: 500, reason: "Unexpected server or storage error." }
     ]
   },
@@ -757,6 +1017,64 @@ export const apiEndpoints = {
       { status: 500, reason: "Unexpected server or storage error." }
     ]
   },
+  "management-webhooks-deliveries": {
+    key: "management-webhooks-deliveries",
+    group: "management",
+    label: "GET /management/webhooks/deliveries",
+    method: "GET",
+    path: "/management/webhooks/deliveries",
+    title: "List Webhook Deliveries",
+    summary: "List recent webhook delivery runs and their retry/delivery status.",
+    details: [
+      "Requires management API key auth.",
+      "Returns the latest webhook delivery rows across configured endpoints.",
+      "Use the optional limit query parameter to control result count; default is 25 and max is 100.",
+      "Delivery rows are created only for endpoints that were enabled and subscribed when the event was emitted."
+    ],
+    curl: `curl -sS "http://localhost:8080/management/webhooks/deliveries?limit=25" \
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body; optional query parameter: limit)`,
+    responseBody: `{
+  "deliveries": [
+    {
+      "id": 42,
+      "endpoint_id": 1,
+      "endpoint_name": "audit-sync",
+      "endpoint_url": "https://example.com/hooks/license",
+      "event_type": "license.generated",
+      "status": "delivered",
+      "attempts": 1,
+      "last_response_status": 200,
+      "last_error": null,
+      "next_attempt_at": "2026-04-21T12:00:00Z",
+      "created_at": "2026-04-21T12:00:00Z",
+      "updated_at": "2026-04-21T12:00:01Z",
+      "delivered_at": "2026-04-21T12:00:01Z"
+    }
+  ]
+}`,
+    responseFields: [
+      { name: "deliveries", type: "array", description: "Recent webhook delivery run records." },
+      { name: "deliveries[].id", type: "number", description: "Stable delivery id used in webhook headers." },
+      { name: "deliveries[].endpoint_id", type: "number", description: "Webhook endpoint id." },
+      { name: "deliveries[].endpoint_name", type: "string", description: "Endpoint name at read time." },
+      { name: "deliveries[].endpoint_url", type: "string", description: "Endpoint URL at read time." },
+      { name: "deliveries[].event_type", type: "string", description: "Webhook event type." },
+      { name: "deliveries[].status", type: '"pending" | "sending" | "delivered" | "failed"', description: "Current delivery state." },
+      { name: "deliveries[].attempts", type: "number", description: "Number of delivery attempts made." },
+      { name: "deliveries[].last_response_status", type: "number | null", description: "Last HTTP status received from the endpoint." },
+      { name: "deliveries[].last_error", type: "string | null", description: "Last delivery error, if any." },
+      { name: "deliveries[].next_attempt_at", type: "string", description: "RFC3339 timestamp for the next retry when pending." },
+      { name: "deliveries[].created_at", type: "string", description: "RFC3339 timestamp when the delivery was queued." },
+      { name: "deliveries[].updated_at", type: "string", description: "RFC3339 timestamp when delivery state last changed." },
+      { name: "deliveries[].delivered_at", type: "string | null", description: "RFC3339 timestamp when delivery succeeded." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid limit query parameter." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
   "management-webhooks-create": {
     key: "management-webhooks-create",
     group: "management",
@@ -900,9 +1218,15 @@ export const apiEndpointOrder = [
   "management-api-keys-create",
   "management-api-keys-revoke",
   "management-webhooks-list",
+  "management-webhooks-deliveries",
   "management-webhooks-create",
   "management-webhooks-update",
-  "management-webhooks-delete"
+  "management-webhooks-delete",
+  "management-offline-signing-keys-list",
+  "management-offline-signing-keys-create",
+  "management-offline-signing-keys-activate",
+  "management-offline-signing-keys-retire",
+  "management-offline-public-keys-list"
 ];
 
 export function endpointDocHref(endpointKey) {

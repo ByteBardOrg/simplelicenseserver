@@ -7,6 +7,7 @@ const saving = ref(false)
 const error = ref('')
 const slugs = ref([])
 const editing = ref('')
+const showArchived = ref(false)
 
 const form = reactive({
   name: '',
@@ -14,6 +15,8 @@ const form = reactive({
   expiration_type: 'forever',
   expiration_days: '',
   fixed_expires_at: '',
+  offline_enabled: false,
+  offline_token_lifetime_hours: 24,
 })
 
 const resetForm = () => {
@@ -22,6 +25,8 @@ const resetForm = () => {
   form.expiration_type = 'forever'
   form.expiration_days = ''
   form.fixed_expires_at = ''
+  form.offline_enabled = false
+  form.offline_token_lifetime_hours = 24
   editing.value = ''
 }
 
@@ -59,6 +64,8 @@ const buildPayload = () => {
     name: form.name.trim(),
     max_activations: Number(form.max_activations),
     expiration_type: form.expiration_type,
+    offline_enabled: form.offline_enabled,
+    offline_token_lifetime_hours: Number(form.offline_token_lifetime_hours),
   }
 
   if (form.expiration_type === 'duration' && form.expiration_days !== '') {
@@ -83,7 +90,7 @@ const loadSlugs = async () => {
   loading.value = true
   error.value = ''
   try {
-    const res = await slugAPI.list()
+    const res = await slugAPI.list({ include_archived: showArchived.value })
     slugs.value = res.data.slugs || []
   } catch (err) {
     error.value = err?.response?.data?.error || 'Failed to load slugs'
@@ -111,15 +118,23 @@ const submit = async () => {
 }
 
 const editSlug = (slug) => {
+  if (slug.deleted_at) {
+    return
+  }
   editing.value = slug.name
   form.name = slug.name
   form.max_activations = slug.max_activations
   form.expiration_type = slug.expiration_type
   form.expiration_days = slug.expiration_days ?? ''
   form.fixed_expires_at = toDateInputValue(slug.fixed_expires_at)
+  form.offline_enabled = Boolean(slug.offline_enabled)
+  form.offline_token_lifetime_hours = slug.offline_token_lifetime_hours || 24
 }
 
 const removeSlug = async (slug) => {
+  if (slug.deleted_at) {
+    return
+  }
   if (!confirm(`Delete slug "${slug.name}"?`)) {
     return
   }
@@ -137,6 +152,13 @@ const formatExpiration = (slug) => {
   if (slug.expiration_type === 'duration') return `${slug.expiration_days} days`
   if (slug.expiration_type === 'fixed_date') return formatDate(slug.fixed_expires_at)
   return 'Never expires'
+}
+
+const formatOfflineLifetime = (hours) => {
+  const value = Number(hours || 0)
+  if (value <= 0) return 'Not set'
+  if (value % 24 === 0) return `${value / 24}d`
+  return `${value}h`
 }
 
 onMounted(loadSlugs)
@@ -181,6 +203,20 @@ onMounted(loadSlugs)
           <span class="mt-2 block text-xs text-[#8f98ad]">Expires automatically at 11:59:59 PM local time.</span>
         </label>
 
+        <label class="flex items-start gap-3 rounded-md bg-[#1c1f2a] px-3 py-3 text-sm text-[#c6ccdc]">
+          <input v-model="form.offline_enabled" type="checkbox" class="mt-1 accent-[#a4c9ff]" />
+          <span>
+            <span class="block text-xs font-semibold text-white">Offline JWTs</span>
+            <span class="mt-1 block text-xs leading-5 text-[#8f98ad]">Allow activated seats for this slug to receive refreshed offline tokens.</span>
+          </span>
+        </label>
+
+        <label v-if="form.offline_enabled" class="block text-sm text-[#c6ccdc]">
+          <span class="mb-2 block text-xs font-semibold text-white">Offline Token Lifetime (hours)</span>
+          <input v-model="form.offline_token_lifetime_hours" min="1" type="number" class="field-control text-sm" />
+          <span class="mt-2 block text-xs text-[#8f98ad]">Default is 24 hours. License expiration still caps token expiration.</span>
+        </label>
+
         <div class="flex gap-2 pt-1">
           <button :disabled="saving" class="primary-action px-4 py-2 text-sm disabled:opacity-60">
             {{ editing ? 'Update Slug' : 'Create Slug' }}
@@ -194,9 +230,15 @@ onMounted(loadSlugs)
       <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 class="text-xl font-black tracking-tight text-white">Configured slugs.</h2>
-          <p class="mt-1 text-sm text-[#8f98ad]">{{ slugs.length }} slug templates available</p>
+          <p class="mt-1 text-sm text-[#8f98ad]">{{ slugs.length }} slug templates {{ showArchived ? 'loaded' : 'available' }}</p>
         </div>
-        <button class="secondary-action px-3 py-2 text-xs" @click="loadSlugs">Refresh</button>
+        <div class="flex items-center gap-2">
+          <label class="flex items-center gap-2 rounded-md bg-[#1c1f2a] px-3 py-2 text-xs text-[#c6ccdc]">
+            <input v-model="showArchived" type="checkbox" class="accent-[#a4c9ff]" @change="loadSlugs" />
+            Show archived
+          </label>
+          <button class="secondary-action px-3 py-2 text-xs" @click="loadSlugs">Refresh</button>
+        </div>
       </div>
 
       <p v-if="loading" class="mt-6 rounded-md bg-[#1c1f2a] px-3 py-8 text-center text-sm text-[#8f98ad]">Loading slugs...</p>
@@ -209,23 +251,33 @@ onMounted(loadSlugs)
               <th class="px-3 py-3 font-bold">Name</th>
               <th class="px-3 py-3 font-bold">Max</th>
               <th class="px-3 py-3 font-bold">Expiration</th>
+              <th class="px-3 py-3 font-bold">Offline</th>
+              <th class="px-3 py-3 font-bold">Token TTL</th>
               <th class="px-3 py-3 font-bold">Default</th>
               <th class="px-3 py-3 text-right font-bold">Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="slug in slugs" :key="slug.id" class="group">
-              <td class="rounded-l-md bg-[#1c1f2a] px-3 py-3 font-semibold text-[#dfe2f1] group-hover:bg-[#262a35]">{{ slug.name }}</td>
-              <td class="bg-[#1c1f2a] px-3 py-3 text-[#dfe2f1] group-hover:bg-[#262a35]">{{ slug.max_activations }}</td>
-              <td class="bg-[#1c1f2a] px-3 py-3 text-[#dfe2f1] group-hover:bg-[#262a35]">{{ formatExpiration(slug) }}</td>
+              <td class="rounded-l-md bg-[#1c1f2a] px-3 py-3 font-semibold group-hover:bg-[#262a35]" :class="slug.deleted_at ? 'text-[#8f98ad] line-through' : 'text-[#dfe2f1]'">
+                {{ slug.name }}
+              </td>
+              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]" :class="slug.deleted_at ? 'text-[#8f98ad]' : 'text-[#dfe2f1]'">{{ slug.max_activations }}</td>
+              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]" :class="slug.deleted_at ? 'text-[#8f98ad]' : 'text-[#dfe2f1]'">{{ formatExpiration(slug) }}</td>
               <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]">
-                <span class="inline-flex rounded-md px-2 py-1 metadata-label text-[0.65rem] font-bold" :class="slug.is_default ? 'bg-[#4ae176]/10 text-[#4ae176]' : 'bg-[#a4c9ff]/10 text-[#a4c9ff]'">
-                  {{ slug.is_default ? 'Default' : 'Custom' }}
+                <span class="inline-flex rounded-md px-2 py-1 metadata-label text-[0.65rem] font-bold" :class="slug.offline_enabled ? 'bg-[#4ae176]/10 text-[#4ae176]' : 'bg-[#8f98ad]/10 text-[#8f98ad]'">
+                  {{ slug.offline_enabled ? 'Enabled' : 'Disabled' }}
+                </span>
+              </td>
+              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]" :class="slug.deleted_at ? 'text-[#8f98ad]' : 'text-[#dfe2f1]'">{{ formatOfflineLifetime(slug.offline_token_lifetime_hours) }}</td>
+              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]">
+                <span class="inline-flex rounded-md px-2 py-1 metadata-label text-[0.65rem] font-bold" :class="slug.deleted_at ? 'bg-[#ffb347]/10 text-[#ffb347]' : (slug.is_default ? 'bg-[#4ae176]/10 text-[#4ae176]' : 'bg-[#a4c9ff]/10 text-[#a4c9ff]')">
+                  {{ slug.deleted_at ? 'Archived' : (slug.is_default ? 'Default' : 'Custom') }}
                 </span>
               </td>
               <td class="rounded-r-md bg-[#1c1f2a] px-3 py-3 text-right group-hover:bg-[#262a35]">
-                <button class="metadata-label text-[0.65rem] font-bold text-[#a4c9ff] transition hover:text-white" @click="editSlug(slug)">Edit</button>
-                <button class="ml-4 metadata-label text-[0.65rem] font-bold text-[#ff7a8a] transition hover:text-white disabled:text-[#8f98ad] disabled:opacity-50" :disabled="slug.is_default" @click="removeSlug(slug)">Delete</button>
+                <button class="metadata-label text-[0.65rem] font-bold text-[#a4c9ff] transition hover:text-white disabled:text-[#8f98ad] disabled:opacity-50" :disabled="Boolean(slug.deleted_at)" @click="editSlug(slug)">Edit</button>
+                <button class="ml-4 metadata-label text-[0.65rem] font-bold text-[#ff7a8a] transition hover:text-white disabled:text-[#8f98ad] disabled:opacity-50" :disabled="slug.is_default || Boolean(slug.deleted_at)" @click="removeSlug(slug)">Delete</button>
               </td>
             </tr>
           </tbody>

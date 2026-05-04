@@ -16,7 +16,8 @@ MANAGEMENT_API_KEYS=management_key_prod_please_make_this_long_and_random
 # Optional
 PORT=8080
 UI_ENABLED=false
-REQUEST_TIMEOUT=15s`;
+REQUEST_TIMEOUT=15s
+OFFLINE_SIGNING_ENCRYPTION_KEY=replace_with_32_plus_chars_before_creating_signing_keys`;
 
 const optionRows = [
   {
@@ -126,7 +127,25 @@ const optionRows = [
     required: "No",
     defaultValue: "false",
     description: "Trust X-Forwarded-For/X-Real-IP when running behind a trusted proxy."
-  }
+  },
+  {
+    name: "OFFLINE_SIGNING_ENCRYPTION_KEY",
+    required: "No*",
+    defaultValue: "None",
+    description: "Stable 32+ character secret used to encrypt offline signing private keys at rest. Required before creating or using signing keys."
+  },
+  {
+    name: "OFFLINE_TOKEN_ISSUER",
+    required: "No",
+    defaultValue: "simple-license-server",
+    description: "Issuer claim written to offline JWTs. Clients should verify this value during offline validation."
+  },
+  {
+    name: "OFFLINE_TOKEN_AUDIENCE",
+    required: "No",
+    defaultValue: "None",
+    description: "Optional audience claim written to offline JWTs. Leave empty when clients do not validate an audience."
+  },
 ];
 
 function OptionsTable({ rows }) {
@@ -191,6 +210,8 @@ export default function ConfigurationPage() {
           <li>All timeout values must be valid Go durations (for example <code>15s</code>, <code>10m</code>).</li>
           <li>When <code>RATE_LIMIT_ENABLED=true</code>, all rate-limit numeric values must be greater than zero.</li>
           <li>Booleans accept values like <code>true/false</code>, <code>1/0</code>, <code>yes/no</code>.</li>
+          <li><code>*</code> <code>OFFLINE_SIGNING_ENCRYPTION_KEY</code> is optional for online-only licensing, but required before creating offline signing keys or issuing offline tokens.</li>
+          <li>Offline token issuance is controlled per slug with <code>offline_enabled</code> and <code>offline_token_lifetime_hours</code>; all slugs default to offline disabled with a 24-hour token lifetime.</li>
         </ul>
       </div>
     </section>

@@ -45,9 +45,16 @@ func (s *Store) ListLicenses(ctx context.Context, params LicenseListParams) (Lic
 		       l.expires_at,
 		       l.created_at,
 		       l.activated_at,
+		       (
+		           SELECT MAX(a.last_validated_at)
+		           FROM activations a
+		           WHERE a.license_id = l.id
+		       ) AS last_validated_at,
 		       l.revoked_at,
 		       l.metadata,
 		       s.name,
+		       s.offline_enabled,
+		       s.offline_token_lifetime_seconds,
 		       l.max_activations,
 		       (
 		           SELECT COUNT(*)
@@ -141,11 +148,12 @@ type licenseListScanner interface {
 
 func scanLicenseListRow(row licenseListScanner) (LicenseRow, error) {
 	var (
-		license      LicenseRow
-		expiresAt    sql.NullTime
-		activatedAt  sql.NullTime
-		revokedAt    sql.NullTime
-		metadataJSON []byte
+		license         LicenseRow
+		expiresAt       sql.NullTime
+		activatedAt     sql.NullTime
+		lastValidatedAt sql.NullTime
+		revokedAt       sql.NullTime
+		metadataJSON    []byte
 	)
 
 	err := row.Scan(
@@ -155,9 +163,12 @@ func scanLicenseListRow(row licenseListScanner) (LicenseRow, error) {
 		&expiresAt,
 		&license.CreatedAt,
 		&activatedAt,
+		&lastValidatedAt,
 		&revokedAt,
 		&metadataJSON,
 		&license.SlugName,
+		&license.OfflineEnabled,
+		&license.OfflineTokenLifetimeSeconds,
 		&license.MaxActivations,
 		&license.ActiveSeats,
 	)
@@ -172,6 +183,10 @@ func scanLicenseListRow(row licenseListScanner) (LicenseRow, error) {
 	if activatedAt.Valid {
 		v := activatedAt.Time.UTC()
 		license.ActivatedAt = &v
+	}
+	if lastValidatedAt.Valid {
+		v := lastValidatedAt.Time.UTC()
+		license.LastValidatedAt = &v
 	}
 	if revokedAt.Valid {
 		v := revokedAt.Time.UTC()

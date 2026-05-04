@@ -22,6 +22,9 @@ func clearOptionalTimeoutEnv(t *testing.T) {
 	t.Setenv("RATE_LIMIT_MAX_IP_ENTRIES", "")
 	t.Setenv("TRUST_PROXY_HEADERS", "")
 	t.Setenv("UI_ENABLED", "")
+	t.Setenv("OFFLINE_SIGNING_ENCRYPTION_KEY", "")
+	t.Setenv("OFFLINE_TOKEN_ISSUER", "")
+	t.Setenv("OFFLINE_TOKEN_AUDIENCE", "")
 }
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
@@ -72,6 +75,9 @@ func TestLoadParsesServerKeysAndTimeouts(t *testing.T) {
 	t.Setenv("RATE_LIMIT_MAX_IP_ENTRIES", "15000")
 	t.Setenv("TRUST_PROXY_HEADERS", "true")
 	t.Setenv("UI_ENABLED", "true")
+	t.Setenv("OFFLINE_SIGNING_ENCRYPTION_KEY", "")
+	t.Setenv("OFFLINE_TOKEN_ISSUER", "")
+	t.Setenv("OFFLINE_TOKEN_AUDIENCE", "")
 
 	cfg, err := Load()
 	if err != nil {

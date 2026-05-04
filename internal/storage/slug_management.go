@@ -13,35 +13,47 @@ import (
 	slugdomain "simple-license-server/internal/domain/slug"
 )
 
+const (
+	DefaultOfflineTokenLifetimeHours   = 24
+	DefaultOfflineTokenLifetimeSeconds = DefaultOfflineTokenLifetimeHours * 3600
+)
+
 type SlugRecord struct {
-	ID             int64
-	Name           string
-	MaxActivations int
-	ExpirationType string
-	ExpirationDays *int
-	FixedExpiresAt *time.Time
-	IsDefault      bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                          int64
+	Name                        string
+	MaxActivations              int
+	ExpirationType              string
+	ExpirationDays              *int
+	FixedExpiresAt              *time.Time
+	OfflineEnabled              bool
+	OfflineTokenLifetimeSeconds int
+	IsDefault                   bool
+	DeletedAt                   *time.Time
+	CreatedAt                   time.Time
+	UpdatedAt                   time.Time
 }
 
 type CreateSlugParams struct {
-	Name           string
-	MaxActivations int
-	ExpirationType string
-	ExpirationDays *int
-	FixedExpiresAt *time.Time
+	Name                        string
+	MaxActivations              int
+	ExpirationType              string
+	ExpirationDays              *int
+	FixedExpiresAt              *time.Time
+	OfflineEnabled              bool
+	OfflineTokenLifetimeSeconds int
 }
 
 type UpdateSlugParams struct {
-	Name           *string
-	MaxActivations *int
-	ExpirationType *string
-	ExpirationDays *int
-	FixedExpiresAt **time.Time
+	Name                        *string
+	MaxActivations              *int
+	ExpirationType              *string
+	ExpirationDays              *int
+	FixedExpiresAt              **time.Time
+	OfflineEnabled              *bool
+	OfflineTokenLifetimeSeconds *int
 }
 
-func (s *Store) ListSlugs(ctx context.Context) ([]SlugRecord, error) {
+func (s *Store) ListSlugs(ctx context.Context, includeArchived bool) ([]SlugRecord, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT id,
 		       name,
@@ -49,12 +61,16 @@ func (s *Store) ListSlugs(ctx context.Context) ([]SlugRecord, error) {
 		       expiration_type,
 		       expiration_days,
 		       fixed_expires_at,
+		       offline_enabled,
+		       offline_token_lifetime_seconds,
 		       is_default,
+		       deleted_at,
 		       created_at,
 		       updated_at
 		FROM slugs
+		WHERE ($1 OR deleted_at IS NULL)
 		ORDER BY created_at ASC
-	`)
+	`, includeArchived)
 	if err != nil {
 		return nil, fmt.Errorf("list slugs: %w", err)
 	}
@@ -90,11 +106,15 @@ func (s *Store) GetSlugByName(ctx context.Context, name string) (SlugRecord, err
 		       expiration_type,
 		       expiration_days,
 		       fixed_expires_at,
+		       offline_enabled,
+		       offline_token_lifetime_seconds,
 		       is_default,
+		       deleted_at,
 		       created_at,
 		       updated_at
 		FROM slugs
 		WHERE name = $1
+		  AND deleted_at IS NULL
 	`, slugName.String())
 
 	record, err := scanSlugRecord(row)
@@ -129,16 +149,24 @@ func (s *Store) CreateSlug(ctx context.Context, params CreateSlugParams) (SlugRe
 		fixedExpiresAt = sql.NullTime{Time: fixed.UTC(), Valid: true}
 	}
 
+	offlineTokenLifetimeSeconds := params.OfflineTokenLifetimeSeconds
+	if offlineTokenLifetimeSeconds <= 0 {
+		offlineTokenLifetimeSeconds = DefaultOfflineTokenLifetimeSeconds
+	}
+
 	row := s.db.QueryRow(ctx, `
-		INSERT INTO slugs (name, max_activations, expiration_type, expiration_days, fixed_expires_at, is_default)
-		VALUES ($1, $2, $3, $4, $5, FALSE)
+		INSERT INTO slugs (name, max_activations, expiration_type, expiration_days, fixed_expires_at, offline_enabled, offline_token_lifetime_seconds, is_default)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE)
 		RETURNING id,
 		          name,
 		          max_activations,
 		          expiration_type,
 		          expiration_days,
 		          fixed_expires_at,
+		          offline_enabled,
+		          offline_token_lifetime_seconds,
 		          is_default,
+		          deleted_at,
 		          created_at,
 		          updated_at
 	`,
@@ -147,6 +175,8 @@ func (s *Store) CreateSlug(ctx context.Context, params CreateSlugParams) (SlugRe
 		policy.ExpirationType(),
 		expirationDays,
 		fixedExpiresAt,
+		params.OfflineEnabled,
+		offlineTokenLifetimeSeconds,
 	)
 
 	record, err := scanSlugRecord(row)
@@ -179,6 +209,19 @@ func (s *Store) UpdateSlugByName(ctx context.Context, currentName string, params
 	expirationType := current.ExpirationType
 	if params.ExpirationType != nil {
 		expirationType = strings.TrimSpace(*params.ExpirationType)
+	}
+
+	offlineEnabled := current.OfflineEnabled
+	if params.OfflineEnabled != nil {
+		offlineEnabled = *params.OfflineEnabled
+	}
+
+	offlineTokenLifetimeSeconds := current.OfflineTokenLifetimeSeconds
+	if params.OfflineTokenLifetimeSeconds != nil {
+		offlineTokenLifetimeSeconds = *params.OfflineTokenLifetimeSeconds
+	}
+	if offlineTokenLifetimeSeconds <= 0 {
+		return SlugRecord{}, fmt.Errorf("offline_token_lifetime_seconds must be greater than 0")
 	}
 
 	var expirationDays sql.NullInt32
@@ -236,15 +279,20 @@ func (s *Store) UpdateSlugByName(ctx context.Context, currentName string, params
 		    expiration_type = $3,
 		    expiration_days = $4,
 		    fixed_expires_at = $5,
+		    offline_enabled = $6,
+		    offline_token_lifetime_seconds = $7,
 		    updated_at = NOW()
-		WHERE id = $6
+		WHERE id = $8
 		RETURNING id,
 		          name,
 		          max_activations,
 		          expiration_type,
 		          expiration_days,
 		          fixed_expires_at,
+		          offline_enabled,
+		          offline_token_lifetime_seconds,
 		          is_default,
+		          deleted_at,
 		          created_at,
 		          updated_at
 	`,
@@ -253,6 +301,8 @@ func (s *Store) UpdateSlugByName(ctx context.Context, currentName string, params
 		policy.ExpirationType(),
 		expirationDays,
 		fixedExpiresAt,
+		offlineEnabled,
+		offlineTokenLifetimeSeconds,
 		current.ID,
 	)
 
@@ -287,6 +337,7 @@ func (s *Store) DeleteSlugByName(ctx context.Context, name string) error {
 		SELECT id, is_default
 		FROM slugs
 		WHERE name = $1
+		  AND deleted_at IS NULL
 	`, name).Scan(&slugID, &isDefault)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -304,6 +355,8 @@ func (s *Store) DeleteSlugByName(ctx context.Context, name string) error {
 		SELECT COUNT(*)
 		FROM licenses
 		WHERE slug_id = $1
+		  AND status <> 'revoked'
+		  AND (expires_at IS NULL OR expires_at > NOW())
 	`, slugID).Scan(&licenseCount)
 	if err != nil {
 		return fmt.Errorf("count slug licenses: %w", err)
@@ -314,8 +367,11 @@ func (s *Store) DeleteSlugByName(ctx context.Context, name string) error {
 	}
 
 	result, err := s.db.Exec(ctx, `
-		DELETE FROM slugs
+		UPDATE slugs
+		SET deleted_at = NOW(),
+		    updated_at = NOW()
 		WHERE id = $1
+		  AND deleted_at IS NULL
 	`, slugID)
 	if err != nil {
 		return fmt.Errorf("delete slug: %w", err)
@@ -337,6 +393,7 @@ func scanSlugRecord(row slugScanner) (SlugRecord, error) {
 		record         SlugRecord
 		expirationDays sql.NullInt32
 		fixedExpiresAt sql.NullTime
+		deletedAt      sql.NullTime
 	)
 
 	err := row.Scan(
@@ -346,7 +403,10 @@ func scanSlugRecord(row slugScanner) (SlugRecord, error) {
 		&record.ExpirationType,
 		&expirationDays,
 		&fixedExpiresAt,
+		&record.OfflineEnabled,
+		&record.OfflineTokenLifetimeSeconds,
 		&record.IsDefault,
+		&deletedAt,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 	)
@@ -362,6 +422,11 @@ func scanSlugRecord(row slugScanner) (SlugRecord, error) {
 	if fixedExpiresAt.Valid {
 		v := fixedExpiresAt.Time.UTC()
 		record.FixedExpiresAt = &v
+	}
+
+	if deletedAt.Valid {
+		v := deletedAt.Time.UTC()
+		record.DeletedAt = &v
 	}
 
 	record.CreatedAt = record.CreatedAt.UTC()

@@ -12,10 +12,13 @@ const supportedEvents = [
 ]
 
 const webhooks = ref([])
+const deliveries = ref([])
 const loading = ref(false)
+const deliveriesLoading = ref(false)
 const saving = ref(false)
 const editingId = ref(0)
 const error = ref('')
+const deliveriesError = ref('')
 
 const form = reactive({
   name: '',
@@ -42,6 +45,19 @@ const load = async () => {
     error.value = err?.response?.data?.error || 'Failed to load webhooks'
   } finally {
     loading.value = false
+  }
+}
+
+const loadDeliveries = async () => {
+  deliveriesLoading.value = true
+  deliveriesError.value = ''
+  try {
+    const res = await webhooksAPI.deliveries(25)
+    deliveries.value = res.data.deliveries || []
+  } catch (err) {
+    deliveriesError.value = err?.response?.data?.error || 'Failed to load webhook run log'
+  } finally {
+    deliveriesLoading.value = false
   }
 }
 
@@ -94,7 +110,24 @@ const removeWebhook = async (id) => {
 
 const eventLabel = (event) => event.replace('license.', '')
 
-onMounted(load)
+const formatDateTime = (value) => {
+  if (!value) return 'Not set'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Not set'
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
+}
+
+const deliveryStatusClass = (status) => {
+  if (status === 'delivered') return 'bg-[#4ae176]/10 text-[#4ae176]'
+  if (status === 'failed') return 'bg-[#ff7a8a]/10 text-[#ff7a8a]'
+  if (status === 'sending') return 'bg-[#a4c9ff]/10 text-[#a4c9ff]'
+  return 'bg-[#f2b36d]/10 text-[#f2b36d]'
+}
+
+onMounted(() => {
+  load()
+  loadDeliveries()
+})
 </script>
 
 <template>
@@ -178,6 +211,60 @@ onMounted(load)
               <td class="rounded-r-md bg-[#1c1f2a] px-3 py-3 text-right group-hover:bg-[#262a35]">
                 <button class="metadata-label text-[0.65rem] font-bold text-[#a4c9ff] transition hover:text-white" @click="editWebhook(hook)">Edit</button>
                 <button class="ml-4 metadata-label text-[0.65rem] font-bold text-[#ff7a8a] transition hover:text-white" @click="removeWebhook(hook.id)">Delete</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="rounded-lg bg-[#171b26] p-4 sm:p-5 xl:col-span-2">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 class="text-xl font-black tracking-tight text-white">Webhook run log.</h2>
+          <p class="mt-1 text-sm text-[#8f98ad]">Recent delivery attempts for enabled webhook endpoints</p>
+        </div>
+        <button class="secondary-action px-3 py-2 text-xs" @click="loadDeliveries">Refresh Log</button>
+      </div>
+
+      <p v-if="deliveriesError" class="mt-4 text-sm text-[#ff7a8a]">{{ deliveriesError }}</p>
+      <p v-if="deliveriesLoading" class="mt-6 rounded-md bg-[#1c1f2a] px-3 py-8 text-center text-sm text-[#8f98ad]">Loading webhook run log...</p>
+      <p v-else-if="deliveries.length === 0" class="mt-6 rounded-md bg-[#1c1f2a] px-3 py-8 text-center text-sm text-[#8f98ad]">No webhook deliveries recorded yet.</p>
+
+      <div v-else class="mt-4 overflow-x-auto">
+        <table class="min-w-full text-left text-sm">
+          <thead class="metadata-label text-xs text-[#8f98ad]">
+            <tr>
+              <th class="px-3 py-3 font-bold">Delivery</th>
+              <th class="px-3 py-3 font-bold">Endpoint</th>
+              <th class="px-3 py-3 font-bold">Event</th>
+              <th class="px-3 py-3 font-bold">Status</th>
+              <th class="px-3 py-3 font-bold">Attempts</th>
+              <th class="px-3 py-3 font-bold">HTTP</th>
+              <th class="px-3 py-3 font-bold">Updated</th>
+              <th class="px-3 py-3 font-bold">Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="delivery in deliveries" :key="delivery.id" class="group">
+              <td class="rounded-l-md bg-[#1c1f2a] px-3 py-3 font-semibold text-[#dfe2f1] group-hover:bg-[#262a35]">#{{ delivery.id }}</td>
+              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]">
+                <p class="font-semibold text-[#dfe2f1]">{{ delivery.endpoint_name }}</p>
+                <code class="mt-1 block max-w-[18rem] truncate text-xs text-[#8f98ad]">{{ delivery.endpoint_url }}</code>
+              </td>
+              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]">
+                <span class="rounded-md bg-[#a4c9ff]/10 px-2 py-1 text-xs text-[#a4c9ff]">{{ eventLabel(delivery.event_type) }}</span>
+              </td>
+              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]">
+                <span class="inline-flex rounded-md px-2 py-1 metadata-label text-[0.65rem] font-bold" :class="deliveryStatusClass(delivery.status)">
+                  {{ delivery.status }}
+                </span>
+              </td>
+              <td class="bg-[#1c1f2a] px-3 py-3 text-[#dfe2f1] group-hover:bg-[#262a35]">{{ delivery.attempts }}</td>
+              <td class="bg-[#1c1f2a] px-3 py-3 text-[#dfe2f1] group-hover:bg-[#262a35]">{{ delivery.last_response_status || 'none' }}</td>
+              <td class="bg-[#1c1f2a] px-3 py-3 text-[#dfe2f1] group-hover:bg-[#262a35]">{{ formatDateTime(delivery.updated_at) }}</td>
+              <td class="rounded-r-md bg-[#1c1f2a] px-3 py-3 text-[#8f98ad] group-hover:bg-[#262a35]">
+                <span class="block max-w-[22rem] truncate" :title="delivery.last_error || ''">{{ delivery.last_error || 'none' }}</span>
               </td>
             </tr>
           </tbody>

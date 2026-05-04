@@ -11,6 +11,7 @@ const pages = [
   { name: 'Licenses', path: '/licenses' },
   { name: 'API Keys', path: '/api-keys' },
   { name: 'Webhooks', path: '/webhooks' },
+  { name: 'Offline Licenses', path: '/offline-licenses' },
 ]
 
 const isActive = (pageName) => {
