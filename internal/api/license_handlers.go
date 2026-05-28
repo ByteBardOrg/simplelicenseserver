@@ -299,7 +299,8 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if result.Valid && result.OfflineEnabled {
 		var err error
-		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, result.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
+		// Pass metadata to issueOfflineToken
+		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, result.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds, result.Metadata)
 		if err != nil {
 			s.writeUnexpectedError(w, "failed to issue offline token", err)
 			return
@@ -368,7 +369,8 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if result.Valid && result.OfflineEnabled {
 		var err error
-		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, req.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
+		// Pass metadata to issueOfflineToken
+		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, req.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds, result.Metadata)
 		if err != nil {
 			s.writeUnexpectedError(w, "failed to refresh offline token", err)
 			return
