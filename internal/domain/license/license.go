@@ -23,10 +23,12 @@ const (
 	ReasonFingerprintNotActive Reason = "fingerprint_not_active"
 )
 
+// License struct now includes a Metadata field
 type License struct {
 	status         Status
 	expiresAt      *time.Time
 	maxActivations MaxActivations
+	metadata       map[string]interface{}
 }
 
 type MaxActivations struct {
@@ -37,6 +39,7 @@ type RehydrateParams struct {
 	Status         string
 	ExpiresAt      *time.Time
 	MaxActivations int
+	Metadata       map[string]interface{} // New field for metadata
 }
 
 type ActivationResult struct {
@@ -78,7 +81,16 @@ func Rehydrate(params RehydrateParams) (*License, error) {
 		status:         status,
 		expiresAt:      cloneTime(params.ExpiresAt),
 		maxActivations: maxActivations,
+		metadata:       params.Metadata, // Include metadata
 	}, nil
+}
+
+// New method to retrieve metadata
+func (l *License) Metadata() map[string]interface{} {
+	if l.metadata == nil {
+		return map[string]interface{}{}
+	}
+	return l.metadata
 }
 
 func NewMaxActivations(value int) (MaxActivations, error) {
