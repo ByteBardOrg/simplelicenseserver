@@ -66,6 +66,18 @@ type DeactivationResult struct {
 	StatusChanged bool
 }
 
+// copyMap creates a deep copy of a map[string]interface{}
+func copyMap(m map[string]interface{}) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	copied := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		copied[k] = v
+	}
+	return copied
+}
+
 func Rehydrate(params RehydrateParams) (*License, error) {
 	status, err := parseStatus(params.Status)
 	if err != nil {
@@ -81,16 +93,13 @@ func Rehydrate(params RehydrateParams) (*License, error) {
 		status:         status,
 		expiresAt:      cloneTime(params.ExpiresAt),
 		maxActivations: maxActivations,
-		metadata:       params.Metadata, // Include metadata
+		metadata:       copyMap(params.Metadata), // Defensive copy of metadata
 	}, nil
 }
 
-// New method to retrieve metadata
+// New method to retrieve metadata (returns a defensive copy)
 func (l *License) Metadata() map[string]interface{} {
-	if l.metadata == nil {
-		return map[string]interface{}{}
-	}
-	return l.metadata
+	return copyMap(l.metadata)
 }
 
 func NewMaxActivations(value int) (MaxActivations, error) {
