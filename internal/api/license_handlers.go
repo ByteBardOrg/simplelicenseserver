@@ -36,10 +36,10 @@ type revokeResponse struct {
 	RevokedAt  time.Time `json:"revoked_at"`
 }
 
+// Removed Metadata from activateRequest: users should not provide metadata during activation
 type activateRequest struct {
-	LicenseKey  string         `json:"license_key"`
-	Fingerprint string         `json:"fingerprint"`
-	Metadata    map[string]any `json:"metadata"`
+	LicenseKey  string `json:"license_key"`
+	Fingerprint string `json:"fingerprint"`
 }
 
 type activateResponse struct {
@@ -269,15 +269,9 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
-	if req.Metadata == nil {
-		req.Metadata = map[string]any{}
-	}
-	if err := validateMetadata(req.Metadata); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-		return
-	}
 
-	result, err := s.service.ActivateLicense(r.Context(), req.LicenseKey, req.Fingerprint, req.Metadata)
+	// Call ActivateLicense without user-provided metadata
+	result, err := s.service.ActivateLicense(r.Context(), req.LicenseKey, req.Fingerprint, nil)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "license not found"})
@@ -299,7 +293,7 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if result.Valid && result.OfflineEnabled {
 		var err error
-		// Pass metadata to issueOfflineToken
+		// Pass the license's metadata (from result.Metadata) to issueOfflineToken
 		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, result.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds, result.Metadata)
 		if err != nil {
 			s.writeUnexpectedError(w, "failed to issue offline token", err)
@@ -369,7 +363,7 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if result.Valid && result.OfflineEnabled {
 		var err error
-		// Pass metadata to issueOfflineToken
+		// Pass the license's metadata (from result.Metadata) to issueOfflineToken
 		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, req.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds, result.Metadata)
 		if err != nil {
 			s.writeUnexpectedError(w, "failed to refresh offline token", err)
