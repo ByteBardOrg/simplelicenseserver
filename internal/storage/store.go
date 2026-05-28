@@ -76,7 +76,7 @@ type RevokeResult struct {
 	RevokedAt  time.Time
 }
 
-// ActivationResult now includes Metadata
+// ActivationResult includes Metadata from the license
 type ActivationResult struct {
 	Valid                       bool
 	Status                      string
@@ -88,10 +88,10 @@ type ActivationResult struct {
 	OfflineEnabled              bool
 	OfflineTokenLifetimeSeconds int
 	Reason                      string
-	Metadata                    map[string]any // New field for metadata
+	Metadata                    map[string]any // Metadata from the license
 }
 
-// ValidationResult now includes Metadata
+// ValidationResult includes Metadata from the license
 type ValidationResult struct {
 	Valid                       bool
 	Status                      string
@@ -101,7 +101,7 @@ type ValidationResult struct {
 	OfflineEnabled              bool
 	OfflineTokenLifetimeSeconds int
 	Reason                      string
-	Metadata                    map[string]any // New field for metadata
+	Metadata                    map[string]any // Metadata from the license
 }
 
 type DeactivationResult struct {
@@ -495,7 +495,8 @@ func (s *Store) RevokeLicense(ctx context.Context, licenseKey string) (RevokeRes
 	}, nil
 }
 
-func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (ActivationResult, error) {
+// ActivateLicense does not accept user-provided metadata; it uses the license's metadata
+func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint string, _ map[string]any) (ActivationResult, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return ActivationResult{}, fmt.Errorf("begin activate tx: %w", err)
@@ -511,7 +512,7 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 		Status:         license.Status,
 		ExpiresAt:      license.ExpiresAt,
 		MaxActivations: license.MaxActivations,
-		Metadata:       license.Metadata, // Pass metadata to Rehydrate
+		Metadata:       license.Metadata, // Pass license's metadata to Rehydrate
 	})
 	if err != nil {
 		return ActivationResult{}, fmt.Errorf("rehydrate license aggregate: %w", err)
@@ -545,7 +546,7 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 			OfflineEnabled:              license.OfflineEnabled,
 			OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
 			Reason:                      string(decision.Reason),
-			Metadata:                    license.Metadata, // Include metadata
+			Metadata:                    license.Metadata, // Include license's metadata
 		}, nil
 	}
 
@@ -560,7 +561,8 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 	}
 
 	if decision.CreateActivation {
-		metadataJSON, err := metadataToJSON(metadata)
+		// Use the license's metadata for the activation
+		metadataJSON, err := metadataToJSON(license.Metadata)
 		if err != nil {
 			return ActivationResult{}, err
 		}
@@ -623,7 +625,7 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 		ExpiresAt:                   license.ExpiresAt,
 		OfflineEnabled:              license.OfflineEnabled,
 		OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
-		Metadata:                    license.Metadata, // Include metadata
+		Metadata:                    license.Metadata, // Include license's metadata
 	}, nil
 }
 
@@ -643,7 +645,7 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 		Status:         license.Status,
 		ExpiresAt:      license.ExpiresAt,
 		MaxActivations: license.MaxActivations,
-		Metadata:       license.Metadata, // Pass metadata to Rehydrate
+		Metadata:       license.Metadata, // Pass license's metadata to Rehydrate
 	})
 	if err != nil {
 		return ValidationResult{}, fmt.Errorf("rehydrate license aggregate: %w", err)
@@ -666,7 +668,7 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 			OfflineEnabled:              license.OfflineEnabled,
 			OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
 			Reason:                      string(decision.Reason),
-			Metadata:                    license.Metadata, // Include metadata
+			Metadata:                    license.Metadata, // Include license's metadata
 		}, nil
 	}
 
@@ -710,77 +712,6 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 		ExpiresAt:                   license.ExpiresAt,
 		OfflineEnabled:              license.OfflineEnabled,
 		OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
-		Metadata:                    license.Metadata, // Include metadata
-	}, nil
-}
-
-func (s *Store) DeactivateLicense(ctx context.Context, licenseKey, fingerprint, reason string) (DeactivationResult, error) {
-	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return DeactivationResult{}, fmt.Errorf("begin deactivate tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	license, err := loadLicenseByKey(ctx, tx, licenseKey, true)
-	if err != nil {
-		return DeactivationResult{}, err
-	}
-
-	aggregate, err := licensedomain.Rehydrate(licensedomain.RehydrateParams{
-		Status:         license.Status,
-		ExpiresAt:      license.ExpiresAt,
-		MaxActivations: license.MaxActivations,
-	})
-	if err != nil {
-		return DeactivationResult{}, fmt.Errorf("rehydrate license aggregate: %w", err)
-	}
-
-	now := time.Now().UTC()
-	activationID, err := findActiveActivationID(ctx, tx, license.ID, fingerprint)
-	if err != nil {
-		return DeactivationResult{}, err
-	}
-
-	released := false
-	if activationID > 0 {
-		released = true
-		if _, err := tx.Exec(ctx, `
-			UPDATE activations
-			SET deactivated_at = $1,
-			    deactivation_reason = NULLIF($2, ''),
-			    last_validated_at = COALESCE(last_validated_at, $1)
-			WHERE id = $3
-		`, now, strings.TrimSpace(reason), activationID); err != nil {
-			return DeactivationResult{}, fmt.Errorf("deactivate activation: %w", err)
-		}
-	}
-
-	activeSeats, err := countActiveSeats(ctx, tx, license.ID)
-	if err != nil {
-		return DeactivationResult{}, err
-	}
-
-	decision := aggregate.Deactivate(activeSeats)
-	if decision.StatusChanged {
-		if _, err := tx.Exec(ctx, `
-			UPDATE licenses
-			SET status = $1
-			WHERE id = $2
-		`, string(aggregate.Status()), license.ID); err != nil {
-			return DeactivationResult{}, fmt.Errorf("update license status during deactivate: %w", err)
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return DeactivationResult{}, fmt.Errorf("commit deactivate tx: %w", err)
-	}
-
-	return DeactivationResult{
-		Valid:          true,
-		Released:       released,
-		Status:         string(aggregate.Status()),
-		ActiveSeats:    activeSeats,
-		MaxActivations: license.MaxActivations,
-		ExpiresAt:      license.ExpiresAt,
+		Metadata:                    license.Metadata, // Include license's metadata
 	}, nil
 }
