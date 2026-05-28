@@ -11,7 +11,14 @@ import (
 	"simple-license-server/internal/storage"
 )
 
-func (s *Server) issueOfflineToken(ctx context.Context, licenseID, slugName, fingerprint string, licenseExpiresAt *time.Time, lifetimeSeconds int) (string, error) {
+// issueOfflineToken now accepts metadata
+func (s *Server) issueOfflineToken(
+	ctx context.Context,
+	licenseID, slugName, fingerprint string,
+	licenseExpiresAt *time.Time,
+	lifetimeSeconds int,
+	metadata map[string]interface{},
+) (string, error) {
 	licenseID = strings.TrimSpace(licenseID)
 	slugName = strings.TrimSpace(slugName)
 	fingerprint = strings.TrimSpace(fingerprint)
@@ -45,13 +52,20 @@ func (s *Server) issueOfflineToken(ctx context.Context, licenseID, slugName, fin
 		return "", nil
 	}
 
-	return offlinejwt.SignEd25519JWT(activeKey.PrivateKeyEncrypted, s.offlineSigningKey, activeKey.Kid, offlinejwt.TokenParams{
-		Issuer:      s.offlineTokenIssuer,
-		Audience:    s.offlineTokenAudience,
-		Subject:     licenseID,
-		Slug:        slugName,
-		Fingerprint: fingerprint,
-		ExpiresAt:   expiresAt,
-		IssuedAt:    now,
-	})
+	// Pass metadata to TokenParams
+	return offlinejwt.SignEd25519JWT(
+		activeKey.PrivateKeyEncrypted,
+		s.offlineSigningKey,
+		activeKey.Kid,
+		offlinejwt.TokenParams{
+			Issuer:      s.offlineTokenIssuer,
+			Audience:    s.offlineTokenAudience,
+			Subject:     licenseID,
+			Slug:        slugName,
+			Fingerprint: fingerprint,
+			ExpiresAt:   expiresAt,
+			IssuedAt:    now,
+			Metadata:    metadata, // Include metadata
+		},
+	)
 }
