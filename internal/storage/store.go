@@ -76,6 +76,7 @@ type RevokeResult struct {
 	RevokedAt  time.Time
 }
 
+// ActivationResult now includes Metadata
 type ActivationResult struct {
 	Valid                       bool
 	Status                      string
@@ -87,8 +88,10 @@ type ActivationResult struct {
 	OfflineEnabled              bool
 	OfflineTokenLifetimeSeconds int
 	Reason                      string
+	Metadata                    map[string]any // New field for metadata
 }
 
+// ValidationResult now includes Metadata
 type ValidationResult struct {
 	Valid                       bool
 	Status                      string
@@ -98,6 +101,7 @@ type ValidationResult struct {
 	OfflineEnabled              bool
 	OfflineTokenLifetimeSeconds int
 	Reason                      string
+	Metadata                    map[string]any // New field for metadata
 }
 
 type DeactivationResult struct {
@@ -507,6 +511,7 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 		Status:         license.Status,
 		ExpiresAt:      license.ExpiresAt,
 		MaxActivations: license.MaxActivations,
+		Metadata:       license.Metadata, // Pass metadata to Rehydrate
 	})
 	if err != nil {
 		return ActivationResult{}, fmt.Errorf("rehydrate license aggregate: %w", err)
@@ -540,6 +545,7 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 			OfflineEnabled:              license.OfflineEnabled,
 			OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
 			Reason:                      string(decision.Reason),
+			Metadata:                    license.Metadata, // Include metadata
 		}, nil
 	}
 
@@ -551,7 +557,6 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 		`, now, activeActivationID); err != nil {
 			return ActivationResult{}, fmt.Errorf("refresh activation validation timestamp: %w", err)
 		}
-
 	}
 
 	if decision.CreateActivation {
@@ -618,6 +623,7 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 		ExpiresAt:                   license.ExpiresAt,
 		OfflineEnabled:              license.OfflineEnabled,
 		OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
+		Metadata:                    license.Metadata, // Include metadata
 	}, nil
 }
 
@@ -637,6 +643,7 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 		Status:         license.Status,
 		ExpiresAt:      license.ExpiresAt,
 		MaxActivations: license.MaxActivations,
+		Metadata:       license.Metadata, // Pass metadata to Rehydrate
 	})
 	if err != nil {
 		return ValidationResult{}, fmt.Errorf("rehydrate license aggregate: %w", err)
@@ -659,6 +666,7 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 			OfflineEnabled:              license.OfflineEnabled,
 			OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
 			Reason:                      string(decision.Reason),
+			Metadata:                    license.Metadata, // Include metadata
 		}, nil
 	}
 
@@ -702,6 +710,7 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 		ExpiresAt:                   license.ExpiresAt,
 		OfflineEnabled:              license.OfflineEnabled,
 		OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
+		Metadata:                    license.Metadata, // Include metadata
 	}, nil
 }
 
@@ -774,757 +783,4 @@ func (s *Store) DeactivateLicense(ctx context.Context, licenseKey, fingerprint, 
 		MaxActivations: license.MaxActivations,
 		ExpiresAt:      license.ExpiresAt,
 	}, nil
-}
-
-func (s *Store) IsAuthorizedServerAPIKey(ctx context.Context, candidate string) (bool, error) {
-	trimmed := strings.TrimSpace(candidate)
-	if trimmed == "" {
-		return false, nil
-	}
-
-	var exists int
-	err := s.db.QueryRow(ctx, `
-		SELECT 1
-		FROM api_keys
-		WHERE key_type = 'server'
-		  AND revoked_at IS NULL
-		  AND key_hash = $1
-		LIMIT 1
-	`, hashAPIKey(trimmed)).Scan(&exists)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
-		}
-		return false, fmt.Errorf("lookup server api key: %w", err)
-	}
-
-	return true, nil
-}
-
-func (s *Store) CreateAPIKey(ctx context.Context, params CreateAPIKeyParams) (CreatedAPIKey, error) {
-	keyType := strings.TrimSpace(params.KeyType)
-	if keyType == "" {
-		keyType = "server"
-	}
-	if keyType != "server" {
-		return CreatedAPIKey{}, fmt.Errorf("unsupported api key type %q", keyType)
-	}
-
-	name := strings.TrimSpace(params.Name)
-	if name == "" {
-		name = "unnamed"
-	}
-
-	for i := 0; i < 8; i++ {
-		apiKey, err := generateAPIKeyValue()
-		if err != nil {
-			return CreatedAPIKey{}, err
-		}
-
-		var (
-			record    APIKeyRecord
-			revokedAt sql.NullTime
-		)
-
-		err = s.db.QueryRow(ctx, `
-			INSERT INTO api_keys (name, key_type, key_hint, key_hash)
-			VALUES ($1, $2, $3, $4)
-			RETURNING id, name, key_type, key_hint, created_at, revoked_at
-		`, name, keyType, keyHint(apiKey), hashAPIKey(apiKey)).Scan(
-			&record.ID,
-			&record.Name,
-			&record.KeyType,
-			&record.KeyHint,
-			&record.CreatedAt,
-			&revokedAt,
-		)
-		if err != nil {
-			if isUniqueViolation(err) {
-				continue
-			}
-			return CreatedAPIKey{}, fmt.Errorf("insert api key: %w", err)
-		}
-
-		if revokedAt.Valid {
-			v := revokedAt.Time.UTC()
-			record.RevokedAt = &v
-		}
-		record.CreatedAt = record.CreatedAt.UTC()
-
-		return CreatedAPIKey{APIKey: apiKey, Record: record}, nil
-	}
-
-	return CreatedAPIKey{}, fmt.Errorf("failed to create unique api key")
-}
-
-func (s *Store) ListAPIKeys(ctx context.Context) ([]APIKeyRecord, error) {
-	rows, err := s.db.Query(ctx, `
-		SELECT id, name, key_type, key_hint, created_at, revoked_at
-		FROM api_keys
-		ORDER BY created_at DESC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("list api keys: %w", err)
-	}
-	defer rows.Close()
-
-	keys := make([]APIKeyRecord, 0)
-	for rows.Next() {
-		var (
-			record    APIKeyRecord
-			revokedAt sql.NullTime
-		)
-
-		if err := rows.Scan(
-			&record.ID,
-			&record.Name,
-			&record.KeyType,
-			&record.KeyHint,
-			&record.CreatedAt,
-			&revokedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan api key row: %w", err)
-		}
-
-		record.CreatedAt = record.CreatedAt.UTC()
-		if revokedAt.Valid {
-			v := revokedAt.Time.UTC()
-			record.RevokedAt = &v
-		}
-
-		keys = append(keys, record)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate api keys: %w", err)
-	}
-
-	return keys, nil
-}
-
-func (s *Store) RevokeAPIKey(ctx context.Context, id int64) (APIKeyRecord, error) {
-	var (
-		record    APIKeyRecord
-		revokedAt sql.NullTime
-	)
-
-	err := s.db.QueryRow(ctx, `
-		UPDATE api_keys
-		SET revoked_at = COALESCE(revoked_at, NOW())
-		WHERE id = $1
-		RETURNING id, name, key_type, key_hint, created_at, revoked_at
-	`, id).Scan(
-		&record.ID,
-		&record.Name,
-		&record.KeyType,
-		&record.KeyHint,
-		&record.CreatedAt,
-		&revokedAt,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return APIKeyRecord{}, ErrNotFound
-		}
-		return APIKeyRecord{}, fmt.Errorf("revoke api key: %w", err)
-	}
-
-	record.CreatedAt = record.CreatedAt.UTC()
-	if revokedAt.Valid {
-		v := revokedAt.Time.UTC()
-		record.RevokedAt = &v
-	}
-
-	return record, nil
-}
-
-func (s *Store) CreateWebhookEndpoint(ctx context.Context, params CreateWebhookEndpointParams) (WebhookEndpoint, error) {
-	eventsJSON, err := json.Marshal(params.Events)
-	if err != nil {
-		return WebhookEndpoint{}, fmt.Errorf("marshal webhook events: %w", err)
-	}
-
-	var (
-		endpoint  WebhookEndpoint
-		eventsRaw []byte
-	)
-
-	err = s.db.QueryRow(ctx, `
-		INSERT INTO webhook_endpoints (name, url, events, enabled)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, name, url, events, enabled, created_at, updated_at
-	`, params.Name, params.URL, eventsJSON, params.Enabled).Scan(
-		&endpoint.ID,
-		&endpoint.Name,
-		&endpoint.URL,
-		&eventsRaw,
-		&endpoint.Enabled,
-		&endpoint.CreatedAt,
-		&endpoint.UpdatedAt,
-	)
-	if err != nil {
-		return WebhookEndpoint{}, fmt.Errorf("insert webhook endpoint: %w", err)
-	}
-
-	if err := json.Unmarshal(eventsRaw, &endpoint.Events); err != nil {
-		return WebhookEndpoint{}, fmt.Errorf("decode webhook events: %w", err)
-	}
-
-	endpoint.CreatedAt = endpoint.CreatedAt.UTC()
-	endpoint.UpdatedAt = endpoint.UpdatedAt.UTC()
-	return endpoint, nil
-}
-
-func (s *Store) ListWebhookEndpoints(ctx context.Context) ([]WebhookEndpoint, error) {
-	rows, err := s.db.Query(ctx, `
-		SELECT id, name, url, events, enabled, created_at, updated_at
-		FROM webhook_endpoints
-		ORDER BY created_at DESC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("list webhook endpoints: %w", err)
-	}
-	defer rows.Close()
-
-	endpoints := make([]WebhookEndpoint, 0)
-	for rows.Next() {
-		var (
-			endpoint  WebhookEndpoint
-			eventsRaw []byte
-		)
-
-		if err := rows.Scan(
-			&endpoint.ID,
-			&endpoint.Name,
-			&endpoint.URL,
-			&eventsRaw,
-			&endpoint.Enabled,
-			&endpoint.CreatedAt,
-			&endpoint.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan webhook endpoint row: %w", err)
-		}
-
-		if err := json.Unmarshal(eventsRaw, &endpoint.Events); err != nil {
-			return nil, fmt.Errorf("decode webhook endpoint events: %w", err)
-		}
-
-		endpoint.CreatedAt = endpoint.CreatedAt.UTC()
-		endpoint.UpdatedAt = endpoint.UpdatedAt.UTC()
-		endpoints = append(endpoints, endpoint)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate webhook endpoints: %w", err)
-	}
-
-	return endpoints, nil
-}
-
-func (s *Store) UpdateWebhookEndpoint(ctx context.Context, id int64, params UpdateWebhookEndpointParams) (WebhookEndpoint, error) {
-	current, err := s.getWebhookEndpointByID(ctx, id)
-	if err != nil {
-		return WebhookEndpoint{}, err
-	}
-
-	if params.Name != nil {
-		current.Name = *params.Name
-	}
-	if params.URL != nil {
-		current.URL = *params.URL
-	}
-	if params.Events != nil {
-		current.Events = append([]string(nil), (*params.Events)...)
-	}
-	if params.Enabled != nil {
-		current.Enabled = *params.Enabled
-	}
-
-	eventsJSON, err := json.Marshal(current.Events)
-	if err != nil {
-		return WebhookEndpoint{}, fmt.Errorf("marshal webhook events: %w", err)
-	}
-
-	err = s.db.QueryRow(ctx, `
-		UPDATE webhook_endpoints
-		SET name = $1,
-		    url = $2,
-		    events = $3,
-		    enabled = $4,
-		    updated_at = NOW()
-		WHERE id = $5
-		RETURNING updated_at
-	`, current.Name, current.URL, eventsJSON, current.Enabled, id).Scan(&current.UpdatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return WebhookEndpoint{}, ErrNotFound
-		}
-		return WebhookEndpoint{}, fmt.Errorf("update webhook endpoint: %w", err)
-	}
-
-	current.UpdatedAt = current.UpdatedAt.UTC()
-	return current, nil
-}
-
-func (s *Store) DeleteWebhookEndpoint(ctx context.Context, id int64) error {
-	result, err := s.db.Exec(ctx, `
-		DELETE FROM webhook_endpoints
-		WHERE id = $1
-	`, id)
-	if err != nil {
-		return fmt.Errorf("delete webhook endpoint: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-
-	return nil
-}
-
-func (s *Store) EnqueueWebhookEvent(ctx context.Context, eventType string, payload map[string]any) error {
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal webhook payload: %w", err)
-	}
-
-	if _, err := s.db.Exec(ctx, `
-		INSERT INTO webhook_deliveries (endpoint_id, event_type, payload, status, next_attempt_at)
-		SELECT id, $1, $2, 'pending', NOW()
-		FROM webhook_endpoints
-		WHERE enabled = TRUE
-		  AND events ? $1
-	`, strings.TrimSpace(eventType), payloadJSON); err != nil {
-		return fmt.Errorf("enqueue webhook deliveries: %w", err)
-	}
-
-	return nil
-}
-
-func (s *Store) ClaimWebhookDeliveries(ctx context.Context, limit int) ([]WebhookDelivery, error) {
-	if limit <= 0 {
-		limit = 10
-	}
-
-	rows, err := s.db.Query(ctx, `
-		WITH due AS (
-			SELECT d.id
-			FROM webhook_deliveries d
-			WHERE d.status = 'pending'
-			  AND d.next_attempt_at <= NOW()
-			ORDER BY d.next_attempt_at ASC, d.id ASC
-			LIMIT $1
-			FOR UPDATE SKIP LOCKED
-		)
-		UPDATE webhook_deliveries d
-		SET status = 'sending',
-		    attempts = d.attempts + 1,
-		    updated_at = NOW()
-		FROM due
-		WHERE d.id = due.id
-		RETURNING d.id,
-		          d.event_type,
-		          d.payload,
-		          d.attempts,
-		          d.created_at,
-		          (SELECT w.url FROM webhook_endpoints w WHERE w.id = d.endpoint_id)
-	`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("claim webhook deliveries: %w", err)
-	}
-	defer rows.Close()
-
-	deliveries := make([]WebhookDelivery, 0)
-	for rows.Next() {
-		var (
-			delivery   WebhookDelivery
-			payloadRaw []byte
-		)
-
-		if err := rows.Scan(
-			&delivery.ID,
-			&delivery.EventType,
-			&payloadRaw,
-			&delivery.Attempts,
-			&delivery.CreatedAt,
-			&delivery.EndpointURL,
-		); err != nil {
-			return nil, fmt.Errorf("scan claimed webhook delivery: %w", err)
-		}
-
-		if err := json.Unmarshal(payloadRaw, &delivery.Payload); err != nil {
-			return nil, fmt.Errorf("decode claimed webhook payload: %w", err)
-		}
-
-		delivery.CreatedAt = delivery.CreatedAt.UTC()
-		deliveries = append(deliveries, delivery)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate claimed webhook deliveries: %w", err)
-	}
-
-	return deliveries, nil
-}
-
-func (s *Store) MarkWebhookDeliveryDelivered(ctx context.Context, deliveryID int64, statusCode int) error {
-	result, err := s.db.Exec(ctx, `
-		UPDATE webhook_deliveries
-		SET status = 'delivered',
-		    delivered_at = NOW(),
-		    last_error = NULL,
-		    last_response_status = $2,
-		    updated_at = NOW()
-		WHERE id = $1
-	`, deliveryID, statusCode)
-	if err != nil {
-		return fmt.Errorf("mark webhook delivery delivered: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-
-	return nil
-}
-
-func (s *Store) MarkWebhookDeliveryFailed(ctx context.Context, deliveryID int64, nextAttemptAt time.Time, statusCode int, lastError string, permanent bool) error {
-	status := "pending"
-	if permanent {
-		status = "failed"
-	}
-
-	result, err := s.db.Exec(ctx, `
-		UPDATE webhook_deliveries
-		SET status = $2,
-		    next_attempt_at = CASE WHEN $2 = 'pending' THEN $3 ELSE next_attempt_at END,
-		    last_error = NULLIF($4, ''),
-		    last_response_status = NULLIF($5, 0),
-		    updated_at = NOW()
-		WHERE id = $1
-	`, deliveryID, status, nextAttemptAt.UTC(), strings.TrimSpace(lastError), statusCode)
-	if err != nil {
-		return fmt.Errorf("mark webhook delivery failed: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-
-	return nil
-}
-
-func (s *Store) ListWebhookDeliveries(ctx context.Context, limit int) ([]WebhookDeliveryLog, error) {
-	if limit <= 0 {
-		limit = 25
-	}
-
-	rows, err := s.db.Query(ctx, `
-		SELECT d.id,
-		       d.endpoint_id,
-		       w.name,
-		       w.url,
-		       d.event_type,
-		       d.status,
-		       d.attempts,
-		       d.last_response_status,
-		       d.last_error,
-		       d.next_attempt_at,
-		       d.created_at,
-		       d.updated_at,
-		       d.delivered_at
-		FROM webhook_deliveries d
-		JOIN webhook_endpoints w ON w.id = d.endpoint_id
-		ORDER BY d.updated_at DESC, d.id DESC
-		LIMIT $1
-	`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("list webhook deliveries: %w", err)
-	}
-	defer rows.Close()
-
-	deliveries := make([]WebhookDeliveryLog, 0)
-	for rows.Next() {
-		var (
-			delivery           WebhookDeliveryLog
-			lastResponseStatus sql.NullInt32
-			lastError          sql.NullString
-			deliveredAt        sql.NullTime
-		)
-
-		if err := rows.Scan(
-			&delivery.ID,
-			&delivery.EndpointID,
-			&delivery.EndpointName,
-			&delivery.EndpointURL,
-			&delivery.EventType,
-			&delivery.Status,
-			&delivery.Attempts,
-			&lastResponseStatus,
-			&lastError,
-			&delivery.NextAttemptAt,
-			&delivery.CreatedAt,
-			&delivery.UpdatedAt,
-			&deliveredAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan webhook delivery log: %w", err)
-		}
-
-		if lastResponseStatus.Valid {
-			v := int(lastResponseStatus.Int32)
-			delivery.LastResponseStatus = &v
-		}
-		if lastError.Valid {
-			v := lastError.String
-			delivery.LastError = &v
-		}
-		if deliveredAt.Valid {
-			v := deliveredAt.Time.UTC()
-			delivery.DeliveredAt = &v
-		}
-
-		delivery.NextAttemptAt = delivery.NextAttemptAt.UTC()
-		delivery.CreatedAt = delivery.CreatedAt.UTC()
-		delivery.UpdatedAt = delivery.UpdatedAt.UTC()
-		deliveries = append(deliveries, delivery)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate webhook delivery logs: %w", err)
-	}
-
-	return deliveries, nil
-}
-
-func (s *Store) getWebhookEndpointByID(ctx context.Context, id int64) (WebhookEndpoint, error) {
-	var (
-		endpoint  WebhookEndpoint
-		eventsRaw []byte
-	)
-
-	err := s.db.QueryRow(ctx, `
-		SELECT id, name, url, events, enabled, created_at, updated_at
-		FROM webhook_endpoints
-		WHERE id = $1
-	`, id).Scan(
-		&endpoint.ID,
-		&endpoint.Name,
-		&endpoint.URL,
-		&eventsRaw,
-		&endpoint.Enabled,
-		&endpoint.CreatedAt,
-		&endpoint.UpdatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return WebhookEndpoint{}, ErrNotFound
-		}
-		return WebhookEndpoint{}, fmt.Errorf("query webhook endpoint: %w", err)
-	}
-
-	if err := json.Unmarshal(eventsRaw, &endpoint.Events); err != nil {
-		return WebhookEndpoint{}, fmt.Errorf("decode webhook endpoint events: %w", err)
-	}
-
-	endpoint.CreatedAt = endpoint.CreatedAt.UTC()
-	endpoint.UpdatedAt = endpoint.UpdatedAt.UTC()
-	return endpoint, nil
-}
-
-func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool) (LicenseRow, error) {
-	query := `
-		SELECT l.id,
-		       l.key,
-		       l.status,
-		       l.expires_at,
-		       l.max_activations,
-		       l.created_at,
-		       l.activated_at,
-		       l.revoked_at,
-		       l.metadata,
-		       s.name,
-		       s.offline_enabled,
-		       s.offline_token_lifetime_seconds
-		FROM licenses l
-		JOIN slugs s ON s.id = l.slug_id
-		WHERE l.key = $1
-	`
-	if forUpdate {
-		query += ` FOR UPDATE`
-	}
-
-	var (
-		metadataBytes []byte
-		row           LicenseRow
-	)
-
-	err := tx.QueryRow(ctx, query, key).Scan(
-		&row.ID,
-		&row.Key,
-		&row.Status,
-		&row.ExpiresAt,
-		&row.MaxActivations,
-		&row.CreatedAt,
-		&row.ActivatedAt,
-		&row.RevokedAt,
-		&metadataBytes,
-		&row.SlugName,
-		&row.OfflineEnabled,
-		&row.OfflineTokenLifetimeSeconds,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return LicenseRow{}, ErrNotFound
-		}
-		return LicenseRow{}, fmt.Errorf("query license by key: %w", err)
-	}
-
-	if len(metadataBytes) == 0 {
-		row.Metadata = map[string]any{}
-		return row, nil
-	}
-
-	if err := json.Unmarshal(metadataBytes, &row.Metadata); err != nil {
-		return LicenseRow{}, fmt.Errorf("decode metadata json: %w", err)
-	}
-
-	return row, nil
-}
-
-func findActiveActivationID(ctx context.Context, tx pgx.Tx, licenseID, fingerprint string) (int64, error) {
-	var activationID int64
-	err := tx.QueryRow(ctx, `
-		SELECT id
-		FROM activations
-		WHERE license_id = $1
-		  AND fingerprint = $2
-		  AND deactivated_at IS NULL
-		LIMIT 1
-	`, licenseID, fingerprint).Scan(&activationID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("query active activation: %w", err)
-	}
-
-	return activationID, nil
-}
-
-func countActiveSeats(ctx context.Context, tx pgx.Tx, licenseID string) (int, error) {
-	var seats int
-	err := tx.QueryRow(ctx, `
-		SELECT COUNT(*)
-		FROM activations
-		WHERE license_id = $1
-		  AND deactivated_at IS NULL
-	`, licenseID).Scan(&seats)
-	if err != nil {
-		return 0, fmt.Errorf("count active seats: %w", err)
-	}
-
-	return seats, nil
-}
-
-func resolveExpiration(expirationType string, expirationDays sql.NullInt32, fixedExpiresAt sql.NullTime) (*time.Time, error) {
-	now := time.Now().UTC()
-
-	switch expirationType {
-	case "forever":
-		return nil, nil
-	case "duration":
-		if !expirationDays.Valid || expirationDays.Int32 <= 0 {
-			return nil, fmt.Errorf("slug duration expiration requires positive expiration_days")
-		}
-		expiresAt := now.Add(time.Duration(expirationDays.Int32) * 24 * time.Hour)
-		return &expiresAt, nil
-	case "fixed_date":
-		if !fixedExpiresAt.Valid {
-			return nil, fmt.Errorf("slug fixed_date expiration requires fixed_expires_at")
-		}
-		expiresAt := fixedExpiresAt.Time.UTC()
-		return &expiresAt, nil
-	default:
-		return nil, fmt.Errorf("unsupported expiration_type %q", expirationType)
-	}
-}
-
-func metadataToJSON(metadata map[string]any) ([]byte, error) {
-	if metadata == nil {
-		metadata = map[string]any{}
-	}
-
-	b, err := json.Marshal(metadata)
-	if err != nil {
-		return nil, fmt.Errorf("marshal metadata: %w", err)
-	}
-
-	return b, nil
-}
-
-func copyMetadata(metadata map[string]any) map[string]any {
-	if metadata == nil {
-		return map[string]any{}
-	}
-
-	out := make(map[string]any, len(metadata))
-	for k, v := range metadata {
-		out[k] = v
-	}
-
-	return out
-}
-
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23505"
-	}
-	return false
-}
-
-func generateLicenseKey() (string, error) {
-	const groupCount = 5
-	const charsPerGroup = 6
-	const keyBytes = (groupCount * charsPerGroup) / 2
-
-	buf := make([]byte, keyBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("read random bytes: %w", err)
-	}
-
-	raw := strings.ToUpper(hex.EncodeToString(buf))
-	out := make([]byte, 0, len(raw)+(groupCount-1))
-	for i := 0; i < len(raw); i++ {
-		if i > 0 && i%charsPerGroup == 0 {
-			out = append(out, '-')
-		}
-		out = append(out, raw[i])
-	}
-
-	return string(out), nil
-}
-
-func generateAPIKeyValue() (string, error) {
-	const randomBytes = 32
-
-	buf := make([]byte, randomBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("read random bytes for api key: %w", err)
-	}
-
-	encoded := strings.ToLower(hex.EncodeToString(buf))
-	return encoded, nil
-}
-
-func hashAPIKey(raw string) string {
-	sum := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(sum[:])
-}
-
-func keyHint(raw string) string {
-	if len(raw) <= 4 {
-		return raw
-	}
-
-	return raw[:4]
 }
