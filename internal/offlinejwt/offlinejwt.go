@@ -25,6 +25,7 @@ type GeneratedKeyPair struct {
 	PublicPEM  string
 }
 
+// TokenParams now includes a Metadata field
 type TokenParams struct {
 	Issuer      string
 	Audience    string
@@ -33,6 +34,7 @@ type TokenParams struct {
 	Fingerprint string
 	ExpiresAt   time.Time
 	IssuedAt    time.Time
+	Metadata    map[string]interface{} // New field for metadata
 }
 
 func GenerateEd25519KeyPair() (GeneratedKeyPair, error) {
@@ -113,6 +115,7 @@ func DecryptPrivateKey(encryptedPrivateKey, encryptionSecret string) ([]byte, er
 	return plain, nil
 }
 
+// SignEd25519JWT now includes metadata in JWT claims
 func SignEd25519JWT(encryptedPrivateKey, encryptionSecret, kid string, params TokenParams) (string, error) {
 	privatePEM, err := DecryptPrivateKey(encryptedPrivateKey, encryptionSecret)
 	if err != nil {
@@ -155,6 +158,11 @@ func SignEd25519JWT(encryptedPrivateKey, encryptionSecret, kid string, params To
 	}
 	if aud := strings.TrimSpace(params.Audience); aud != "" {
 		claims["aud"] = aud
+	}
+
+	// Include metadata in JWT claims
+	if params.Metadata != nil {
+		claims["metadata"] = params.Metadata
 	}
 
 	headerJSON, err := json.Marshal(header)
