@@ -13,18 +13,19 @@ import (
 )
 
 type slugResponse struct {
-	ID                        int64      `json:"id"`
-	Name                      string     `json:"name"`
-	MaxActivations            int        `json:"max_activations"`
-	ExpirationType            string     `json:"expiration_type"`
-	ExpirationDays            *int       `json:"expiration_days"`
-	FixedExpiresAt            *time.Time `json:"fixed_expires_at"`
-	OfflineEnabled            bool       `json:"offline_enabled"`
-	OfflineTokenLifetimeHours int        `json:"offline_token_lifetime_hours"`
-	IsDefault                 bool       `json:"is_default"`
-	DeletedAt                 *time.Time `json:"deleted_at"`
-	CreatedAt                 time.Time  `json:"created_at"`
-	UpdatedAt                 time.Time  `json:"updated_at"`
+	ID                        int64          `json:"id"`
+	Name                      string         `json:"name"`
+	MaxActivations            int            `json:"max_activations"`
+	ExpirationType            string         `json:"expiration_type"`
+	ExpirationDays            *int           `json:"expiration_days"`
+	FixedExpiresAt            *time.Time     `json:"fixed_expires_at"`
+	OfflineEnabled            bool           `json:"offline_enabled"`
+	OfflineTokenLifetimeHours int            `json:"offline_token_lifetime_hours"`
+	Attributes                map[string]any `json:"attributes"`
+	IsDefault                 bool           `json:"is_default"`
+	DeletedAt                 *time.Time     `json:"deleted_at"`
+	CreatedAt                 time.Time      `json:"created_at"`
+	UpdatedAt                 time.Time      `json:"updated_at"`
 }
 
 type listSlugsResponse struct {
@@ -32,23 +33,25 @@ type listSlugsResponse struct {
 }
 
 type createSlugRequest struct {
-	Name                      string  `json:"name"`
-	MaxActivations            int     `json:"max_activations"`
-	ExpirationType            string  `json:"expiration_type"`
-	ExpirationDays            *int    `json:"expiration_days"`
-	FixedExpiresAt            *string `json:"fixed_expires_at"`
-	OfflineEnabled            bool    `json:"offline_enabled"`
-	OfflineTokenLifetimeHours *int    `json:"offline_token_lifetime_hours"`
+	Name                      string         `json:"name"`
+	MaxActivations            int            `json:"max_activations"`
+	ExpirationType            string         `json:"expiration_type"`
+	ExpirationDays            *int           `json:"expiration_days"`
+	FixedExpiresAt            *string        `json:"fixed_expires_at"`
+	OfflineEnabled            bool           `json:"offline_enabled"`
+	OfflineTokenLifetimeHours *int           `json:"offline_token_lifetime_hours"`
+	Attributes                map[string]any `json:"attributes"`
 }
 
 type updateSlugRequest struct {
-	Name                      *string `json:"name"`
-	MaxActivations            *int    `json:"max_activations"`
-	ExpirationType            *string `json:"expiration_type"`
-	ExpirationDays            *int    `json:"expiration_days"`
-	FixedExpiresAt            *string `json:"fixed_expires_at"`
-	OfflineEnabled            *bool   `json:"offline_enabled"`
-	OfflineTokenLifetimeHours *int    `json:"offline_token_lifetime_hours"`
+	Name                      *string        `json:"name"`
+	MaxActivations            *int           `json:"max_activations"`
+	ExpirationType            *string        `json:"expiration_type"`
+	ExpirationDays            *int           `json:"expiration_days"`
+	FixedExpiresAt            *string        `json:"fixed_expires_at"`
+	OfflineEnabled            *bool          `json:"offline_enabled"`
+	OfflineTokenLifetimeHours *int           `json:"offline_token_lifetime_hours"`
+	Attributes                map[string]any `json:"attributes"`
 }
 
 func (s *Server) handleListSlugs(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +128,10 @@ func (s *Server) handleCreateSlug(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
+	if err := validateAttributes(req.Attributes); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
 
 	record, err := s.service.CreateSlug(r.Context(), storage.CreateSlugParams{
 		Name:                        req.Name,
@@ -134,6 +141,7 @@ func (s *Server) handleCreateSlug(w http.ResponseWriter, r *http.Request) {
 		FixedExpiresAt:              policy.FixedExpiresAt(),
 		OfflineEnabled:              req.OfflineEnabled,
 		OfflineTokenLifetimeSeconds: offlineTokenLifetimeHours * 3600,
+		Attributes:                  req.Attributes,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrConflict) {
@@ -170,9 +178,15 @@ func (s *Server) handleUpdateSlug(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == nil && req.MaxActivations == nil && req.ExpirationType == nil && req.ExpirationDays == nil && req.FixedExpiresAt == nil && req.OfflineEnabled == nil && req.OfflineTokenLifetimeHours == nil {
+	if req.Name == nil && req.MaxActivations == nil && req.ExpirationType == nil && req.ExpirationDays == nil && req.FixedExpiresAt == nil && req.OfflineEnabled == nil && req.OfflineTokenLifetimeHours == nil && req.Attributes == nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "at least one field must be provided"})
 		return
+	}
+	if req.Attributes != nil {
+		if err := validateAttributes(req.Attributes); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
 	}
 
 	resolvedName := current.Name
@@ -245,6 +259,7 @@ func (s *Server) handleUpdateSlug(w http.ResponseWriter, r *http.Request) {
 		FixedExpiresAt:              &fixedParam,
 		OfflineEnabled:              req.OfflineEnabled,
 		OfflineTokenLifetimeSeconds: offlineTokenLifetimeSeconds,
+		Attributes:                  req.Attributes,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -296,6 +311,7 @@ func mapSlugResponse(record storage.SlugRecord) slugResponse {
 		FixedExpiresAt:            record.FixedExpiresAt,
 		OfflineEnabled:            record.OfflineEnabled,
 		OfflineTokenLifetimeHours: offlineTokenLifetimeHoursFromSeconds(record.OfflineTokenLifetimeSeconds),
+		Attributes:                record.Attributes,
 		IsDefault:                 record.IsDefault,
 		DeletedAt:                 record.DeletedAt,
 		CreatedAt:                 record.CreatedAt,
