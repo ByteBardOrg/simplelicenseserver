@@ -21,6 +21,7 @@ type generateResponse struct {
 	Slug       string         `json:"slug"`
 	Status     string         `json:"status"`
 	Metadata   map[string]any `json:"metadata"`
+	Attributes map[string]any `json:"attributes"`
 	ExpiresAt  *time.Time     `json:"expires_at"`
 	CreatedAt  time.Time      `json:"created_at"`
 }
@@ -158,6 +159,7 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 				"slug":        generated.Slug,
 				"status":      generated.Status,
 				"metadata":    generated.Metadata,
+				"attributes":  generated.Attributes,
 				"expires_at":  generated.ExpiresAt,
 				"created_at":  generated.CreatedAt,
 			})
@@ -182,6 +184,7 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		Slug:       generated.Slug,
 		Status:     generated.Status,
 		Metadata:   generated.Metadata,
+		Attributes: generated.Attributes,
 		ExpiresAt:  generated.ExpiresAt,
 		CreatedAt:  generated.CreatedAt,
 	}
@@ -197,6 +200,7 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		"slug":        generated.Slug,
 		"status":      generated.Status,
 		"metadata":    generated.Metadata,
+		"attributes":  generated.Attributes,
 		"expires_at":  generated.ExpiresAt,
 		"created_at":  generated.CreatedAt,
 	})
@@ -299,7 +303,7 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if result.Valid && result.OfflineEnabled {
 		var err error
-		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, result.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
+		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, result.Fingerprint, result.Attributes, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
 		if err != nil {
 			s.writeUnexpectedError(w, "failed to issue offline token", err)
 			return
@@ -368,7 +372,7 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if result.Valid && result.OfflineEnabled {
 		var err error
-		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, req.Fingerprint, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
+		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, req.Fingerprint, result.Attributes, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
 		if err != nil {
 			s.writeUnexpectedError(w, "failed to refresh offline token", err)
 			return

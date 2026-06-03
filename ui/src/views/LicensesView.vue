@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { licensesAPI, slugAPI } from '@/stores/api'
+import { licensesAPI, runtimeAPI, slugAPI } from '@/stores/api'
 import { ArrowDown, ArrowUp, Ban, Check, ChevronsUpDown, Clock3, Files, Search } from 'lucide-vue-next'
 
 const result = ref('')
@@ -17,6 +17,7 @@ const copiedLicenseKey = ref('')
 const loadingSlugs = ref(false)
 const slugs = ref([])
 const slugError = ref('')
+const activatingLicense = ref(false)
 
 const filters = reactive({
   q: '',
@@ -67,6 +68,11 @@ const revokeForm = reactive({
   license_key: '',
 })
 
+const activationForm = reactive({
+  fingerprint: '',
+  metadata: '{}',
+})
+
 const selectedSlug = computed(() => slugs.value.find((slug) => slug.name === generateForm.slug) || null)
 const sortedLicenses = computed(() => {
   return [...licenses.value].sort((left, right) => {
@@ -95,6 +101,14 @@ const parseJSON = (raw) => {
   return JSON.parse(trimmed)
 }
 
+const parseJSONObject = (raw, label) => {
+  const parsed = parseJSON(raw)
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error(`${label} must be a JSON object`)
+  }
+  return parsed
+}
+
 const showResponse = (payload) => {
   result.value = JSON.stringify(payload, null, 2)
 }
@@ -117,6 +131,12 @@ const loadLicenses = async () => {
     licenses.value = res.data.licenses || []
     Object.assign(pagination, res.data.pagination || {})
     Object.assign(counts, res.data.counts || {})
+    if (selectedLicense.value) {
+      const refreshed = licenses.value.find((license) => license.id === selectedLicense.value.id || license.license_key === selectedLicense.value.license_key)
+      if (refreshed) {
+        selectedLicense.value = refreshed
+      }
+    }
   } catch (err) {
     listError.value = err?.response?.data?.error || 'Failed to load licenses'
   } finally {
@@ -188,6 +208,32 @@ const doRevoke = async () => {
   }
 }
 
+const activateSelectedLicense = async () => {
+  if (!selectedLicense.value) return
+
+  const fingerprint = activationForm.fingerprint.trim()
+  if (!fingerprint) {
+    error.value = 'Fingerprint is required'
+    return
+  }
+
+  clearMessages()
+  activatingLicense.value = true
+  try {
+    const res = await runtimeAPI.activate({
+      license_key: selectedLicense.value.license_key,
+      fingerprint,
+      metadata: parseJSONObject(activationForm.metadata, 'Activation metadata'),
+    })
+    showResponse(res.data)
+    await loadLicenses()
+  } catch (err) {
+    error.value = err?.response?.data?.error || err?.message || 'Activation failed'
+  } finally {
+    activatingLicense.value = false
+  }
+}
+
 const revokeListedLicense = async (licenseKey) => {
   closeActionMenu()
   revokeForm.license_key = licenseKey
@@ -198,10 +244,14 @@ const revokeListedLicense = async (licenseKey) => {
 const openDetails = (license) => {
   closeActionMenu()
   selectedLicense.value = license
+  activationForm.fingerprint = ''
+  activationForm.metadata = '{}'
 }
 
 const closeDetails = () => {
   selectedLicense.value = null
+  activationForm.fingerprint = ''
+  activationForm.metadata = '{}'
 }
 
 const closeGenerateDrawer = () => {
@@ -513,6 +563,10 @@ onUnmounted(() => {
                   <span class="text-[#8f98ad]">Slug type</span>
                   <span class="font-semibold text-white">{{ selectedSlug.is_default ? 'Default' : 'Custom' }}</span>
                 </div>
+                <div>
+                  <p class="text-[#8f98ad]">Attributes</p>
+                  <pre class="code-block mt-2 overflow-x-auto rounded-md p-3 text-xs text-[#dfe2f1]">{{ formatMetadata(selectedSlug.attributes) }}</pre>
+                </div>
               </div>
               <p v-else class="mt-3 text-sm text-[#8f98ad]">No slug selected.</p>
             </section>
@@ -574,6 +628,45 @@ onUnmounted(() => {
         <div class="mt-3 rounded-md bg-[#1c1f2a] p-3">
           <p class="metadata-label text-[0.65rem] text-[#8f98ad]">Metadata</p>
           <pre class="code-block mt-3 overflow-x-auto rounded-md p-4 text-xs text-[#dfe2f1]">{{ formatMetadata(selectedLicense.metadata) }}</pre>
+        </div>
+
+        <div class="mt-3 rounded-md bg-[#1c1f2a] p-3">
+          <p class="metadata-label text-[0.65rem] text-[#8f98ad]">Attributes Snapshot</p>
+          <pre class="code-block mt-3 overflow-x-auto rounded-md p-4 text-xs text-[#dfe2f1]">{{ formatMetadata(selectedLicense.attributes) }}</pre>
+        </div>
+
+        <div class="mt-3 rounded-md bg-[#1c1f2a] p-3">
+          <p class="metadata-label text-[0.65rem] text-[#8f98ad]">Activate Runtime Seat</p>
+          <p class="mt-2 text-xs leading-5 text-[#8f98ad]">
+            Provide a fingerprint and optional activation metadata. If the slug is offline-enabled, the returned JWT
+            appears in Last operation.
+          </p>
+
+          <div class="mt-3 grid gap-3">
+            <label class="block text-sm text-[#c6ccdc]">
+              <span class="mb-2 block text-xs font-semibold text-white">Fingerprint</span>
+              <input v-model="activationForm.fingerprint" placeholder="device-123" class="field-control font-mono text-sm" />
+            </label>
+
+            <label class="block text-sm text-[#c6ccdc]">
+              <span class="mb-2 block text-xs font-semibold text-white">Activation Metadata JSON</span>
+              <textarea v-model="activationForm.metadata" rows="5" class="field-control font-mono text-xs"></textarea>
+            </label>
+
+            <p class="text-xs leading-5 text-[#8f98ad]">
+              Activation metadata is stored on the fingerprint activation record when a new seat is created.
+            </p>
+          </div>
+
+          <div class="mt-4 flex justify-end">
+            <button
+              class="primary-action px-4 py-2 text-sm disabled:opacity-60"
+              :disabled="activatingLicense || selectedLicense.status === 'revoked' || !activationForm.fingerprint.trim()"
+              @click="activateSelectedLicense"
+            >
+              {{ selectedLicense.status === 'revoked' ? 'Revoked' : (activatingLicense ? 'Activating...' : 'Activate') }}
+            </button>
+          </div>
         </div>
 
         <div class="mt-5 flex justify-end gap-3">

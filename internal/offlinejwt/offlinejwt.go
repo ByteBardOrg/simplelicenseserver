@@ -31,6 +31,7 @@ type TokenParams struct {
 	Subject     string
 	Slug        string
 	Fingerprint string
+	Attributes  map[string]any
 	ExpiresAt   time.Time
 	IssuedAt    time.Time
 }
@@ -148,6 +149,7 @@ func SignEd25519JWT(encryptedPrivateKey, encryptionSecret, kid string, params To
 		"sub":         strings.TrimSpace(params.Subject),
 		"slug":        strings.TrimSpace(params.Slug),
 		"fingerprint": strings.TrimSpace(params.Fingerprint),
+		"attributes":  copyMap(params.Attributes),
 		"iat":         now.Unix(),
 		"nbf":         now.Unix(),
 		"exp":         expiresAt.Unix(),
@@ -169,6 +171,19 @@ func SignEd25519JWT(encryptedPrivateKey, encryptionSecret, kid string, params To
 	signingInput := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
 	signature := ed25519.Sign(privateKey, []byte(signingInput))
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func copyMap(values map[string]any) map[string]any {
+	if values == nil {
+		return map[string]any{}
+	}
+
+	out := make(map[string]any, len(values))
+	for k, v := range values {
+		out[k] = v
+	}
+
+	return out
 }
 
 func encryptionAEAD(secret string) (cipher.AEAD, error) {

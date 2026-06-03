@@ -17,6 +17,7 @@ const form = reactive({
   fixed_expires_at: '',
   offline_enabled: false,
   offline_token_lifetime_hours: 24,
+  attributes: '{\n  "features": []\n}',
 })
 
 const resetForm = () => {
@@ -27,7 +28,22 @@ const resetForm = () => {
   form.fixed_expires_at = ''
   form.offline_enabled = false
   form.offline_token_lifetime_hours = 24
+  form.attributes = '{\n  "features": []\n}'
   editing.value = ''
+}
+
+const parseJSONObject = (raw, fieldName) => {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return {}
+  }
+
+  const parsed = JSON.parse(trimmed)
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error(`${fieldName} must be a JSON object`)
+  }
+
+  return parsed
 }
 
 const parseLocalExpirationDate = (value) => {
@@ -66,6 +82,7 @@ const buildPayload = () => {
     expiration_type: form.expiration_type,
     offline_enabled: form.offline_enabled,
     offline_token_lifetime_hours: Number(form.offline_token_lifetime_hours),
+    attributes: parseJSONObject(form.attributes, 'Attributes'),
   }
 
   if (form.expiration_type === 'duration' && form.expiration_days !== '') {
@@ -129,6 +146,7 @@ const editSlug = (slug) => {
   form.fixed_expires_at = toDateInputValue(slug.fixed_expires_at)
   form.offline_enabled = Boolean(slug.offline_enabled)
   form.offline_token_lifetime_hours = slug.offline_token_lifetime_hours || 24
+  form.attributes = JSON.stringify(slug.attributes || {}, null, 2)
 }
 
 const removeSlug = async (slug) => {
@@ -215,6 +233,12 @@ onMounted(loadSlugs)
           <span class="mb-2 block text-xs font-semibold text-white">Offline Token Lifetime (hours)</span>
           <input v-model="form.offline_token_lifetime_hours" min="1" type="number" class="field-control text-sm" />
           <span class="mt-2 block text-xs text-[#8f98ad]">Default is 24 hours. License expiration still caps token expiration.</span>
+        </label>
+
+        <label class="block text-sm text-[#c6ccdc]">
+          <span class="mb-2 block text-xs font-semibold text-white">Attributes JSON</span>
+          <textarea v-model="form.attributes" rows="7" class="field-control font-mono text-xs"></textarea>
+          <span class="mt-2 block text-xs text-[#8f98ad]">License information to snapshot into generated licenses and JWT claims.</span>
         </label>
 
         <div class="flex gap-2 pt-1">
