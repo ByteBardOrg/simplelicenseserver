@@ -22,6 +22,10 @@ const webhookEnvelopeExample = `{
     "metadata": {
       "email": "user@example.com"
     },
+    "attributes": {
+      "plan": "starter",
+      "features": []
+    },
     "expires_at": null,
     "created_at": "2026-04-21T12:00:00Z"
   }
@@ -35,6 +39,7 @@ const webhookContractExamples = {
     "slug": "default",
     "status": "inactive",
     "metadata": { "email": "user@example.com" },
+    "attributes": { "plan": "starter", "features": [] },
     "expires_at": "2026-10-20T12:00:00Z",
     "created_at": "2026-04-21T12:00:00Z"
   }

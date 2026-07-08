@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS slugs (
     fixed_expires_at TIMESTAMPTZ,
     offline_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     offline_token_lifetime_seconds INTEGER NOT NULL DEFAULT 86400,
+    attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -36,6 +37,9 @@ END $$;
 
 ALTER TABLE slugs
     ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+ALTER TABLE slugs
+    ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 ALTER TABLE slugs
     ADD COLUMN IF NOT EXISTS offline_token_lifetime_seconds INTEGER NOT NULL DEFAULT 86400;
@@ -75,6 +79,7 @@ CREATE TABLE IF NOT EXISTS licenses (
     slug_id BIGINT NOT NULL REFERENCES slugs(id),
     status TEXT NOT NULL CHECK (status IN ('inactive', 'active', 'revoked')),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
     expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     activated_at TIMESTAMPTZ,
@@ -83,6 +88,9 @@ CREATE TABLE IF NOT EXISTS licenses (
 
 ALTER TABLE licenses
     ADD COLUMN IF NOT EXISTS max_activations INTEGER;
+
+ALTER TABLE licenses
+    ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 UPDATE licenses l
 SET max_activations = s.max_activations

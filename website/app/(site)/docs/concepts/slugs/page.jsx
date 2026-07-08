@@ -17,13 +17,21 @@ const slugPolicyExample = `{
   "expiration_days": 365,
   "fixed_expires_at": null,
   "offline_enabled": false,
-  "offline_token_lifetime_hours": 24
+  "offline_token_lifetime_hours": 24,
+  "attributes": {
+    "plan": "pro",
+    "features": ["analytics", "exports"]
+  }
 }`;
 
 const generatedFromSlugExample = `{
   "license_key": "C1B6DE-39A6E3-DE1529-8559A0-4AF593",
   "slug": "pro-annual",
   "status": "inactive",
+  "attributes": {
+    "plan": "pro",
+    "features": ["analytics", "exports"]
+  },
   "expires_at": "2027-04-21T12:00:00Z",
   "created_at": "2026-04-21T12:00:00Z"
 }`;
@@ -58,6 +66,9 @@ export default function SlugConceptsPage() {
           <li>
             <code>offline_token_lifetime_hours</code>: maximum lifetime for issued/refreshed offline JWTs.
           </li>
+          <li>
+            <code>attributes</code>: JSON object for license information such as plan, features, or entitlement flags.
+          </li>
         </ul>
       </div>
 
@@ -87,7 +98,12 @@ export default function SlugConceptsPage() {
         <h3>Snapshot behavior at issuance</h3>
         <p>
           When your backend calls <code>POST /generate</code>, the server resolves slug policy and stores it on the
-          license. Later slug edits affect new licenses, not existing ones.
+          license. This includes policy fields like expiration and max activations, plus the slug <code>attributes</code>
+          object. Later slug edits affect new licenses, not existing ones.
+        </p>
+        <p>
+          License <code>metadata</code> is different: it comes from the <code>POST /generate</code> request and is stored
+          alongside the slug snapshot for that license instance.
         </p>
         <p>Example slug policy:</p>
         <CodeExample language="json" code={slugPolicyExample} />

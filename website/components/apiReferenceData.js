@@ -266,7 +266,8 @@ export const apiEndpoints = {
     details: [
       "Requires a generated active server API key.",
       "Supports Idempotency-Key for safe webhook retries.",
-      "Resolves slug expiration policy at generation time and stores expires_at on the license."
+      "Resolves slug expiration policy at generation time and stores expires_at on the license.",
+      "Snapshots slug attributes at generation time and returns them as license attributes."
     ],
     curl: `curl -X POST http://localhost:8080/generate \\
   -H "Authorization: Bearer <generated_server_api_key>" \\
@@ -297,6 +298,10 @@ export const apiEndpoints = {
     "external_customer_id": "cus_123",
     "external_order_id": "ord_456"
   },
+  "attributes": {
+    "plan": "pro",
+    "features": ["analytics", "exports"]
+  },
   "expires_at": "2026-10-20T12:00:00Z",
   "created_at": "2026-04-20T12:00:00Z"
 }`,
@@ -304,7 +309,8 @@ export const apiEndpoints = {
       { name: "license_key", type: "string", description: "Generated license key." },
       { name: "slug", type: "string", description: "Slug used at generation time." },
       { name: "status", type: '"inactive" | "active" | "revoked"', description: "Current license status." },
-      { name: "metadata", type: "object", description: "Arbitrary metadata stored with the license." },
+      { name: "metadata", type: "object", description: "Caller-provided JSON from POST /generate for per-license business context (for example customer/order ids)." },
+      { name: "attributes", type: "object", description: "Slug-defined entitlement JSON (for example sku/edition/features/channel) snapshotted onto the license at generation time." },
       {
         name: "expires_at",
         type: "string | null",
@@ -373,6 +379,7 @@ export const apiEndpoints = {
       "Checks revoked/expired state and activation limits.",
       "Creates or confirms an activation for the fingerprint.",
       "Returns token when activation is valid, the slug has offline_enabled=true, and an active signing key exists.",
+      "Issued offline tokens include an attributes claim from the license snapshot.",
       "Returns a non-valid status with reason when activation is denied."
     ],
     curl: `curl -X POST http://localhost:8080/activate \\
@@ -419,7 +426,7 @@ export const apiEndpoints = {
       {
         name: "token",
         type: "string (optional)",
-        description: "Offline JWT issued only when activation is valid, the slug is offline-enabled, and an active signing key exists."
+        description: "Offline JWT issued only when activation is valid, the slug is offline-enabled, and an active signing key exists. Includes a nested attributes claim."
       },
       {
         name: "reason",
@@ -445,6 +452,7 @@ export const apiEndpoints = {
       "Verifies license state and fingerprint binding.",
       "Returns status and expires_at for runtime decisions.",
       "Refreshes token when validation is valid, the slug has offline_enabled=true, and an active signing key exists.",
+      "Refreshed offline tokens include an attributes claim from the license snapshot.",
       "Designed for repeated online validation heartbeats."
     ],
     curl: `curl -X POST http://localhost:8080/validate \\
@@ -479,7 +487,7 @@ export const apiEndpoints = {
       {
         name: "token",
         type: "string (optional)",
-        description: "Refreshed offline JWT returned only when validation is valid, the slug is offline-enabled, and an active signing key exists."
+        description: "Refreshed offline JWT returned only when validation is valid, the slug is offline-enabled, and an active signing key exists. Includes a nested attributes claim."
       },
       {
         name: "reason",
@@ -579,6 +587,10 @@ export const apiEndpoints = {
         "email": "user@example.com",
         "external_customer_id": "cus_123"
       },
+      "attributes": {
+        "plan": "pro",
+        "features": ["analytics", "exports"]
+      },
       "max_activations": 3,
       "active_seats": 1,
       "offline_enabled": true,
@@ -610,7 +622,8 @@ export const apiEndpoints = {
       { name: "licenses[].license_key", type: "string", description: "Issued license key." },
       { name: "licenses[].slug", type: "string", description: "Slug used when the license was generated." },
       { name: "licenses[].status", type: '"inactive" | "active" | "revoked" | "expired"', description: "Display status. Expired is derived from expires_at for non-revoked licenses." },
-      { name: "licenses[].metadata", type: "object", description: "Metadata stored on the license." },
+      { name: "licenses[].metadata", type: "object", description: "Caller-provided JSON originally sent to POST /generate for this license instance." },
+      { name: "licenses[].attributes", type: "object", description: "Slug-defined entitlement JSON snapshotted onto the license at generation time." },
       { name: "licenses[].max_activations", type: "number", description: "Seat limit snapshotted from the slug at generation time." },
       { name: "licenses[].active_seats", type: "number", description: "Current active activation count." },
       { name: "licenses[].offline_enabled", type: "boolean", description: "Whether the license's slug currently allows offline token issuance." },
@@ -640,6 +653,7 @@ export const apiEndpoints = {
     details: [
       "Requires management API key auth.",
       "Returns slug records including expiration policy, offline policy, and default slug flag.",
+      "Returns slug attributes used for license-information snapshots.",
       "Slug policies affect newly generated licenses and are snapshotted at issuance time."
     ],
     curl: `curl -sS http://localhost:8080/management/slugs \\
@@ -656,6 +670,10 @@ export const apiEndpoints = {
       "fixed_expires_at": null,
       "offline_enabled": false,
       "offline_token_lifetime_hours": 24,
+      "attributes": {
+        "plan": "starter",
+        "features": []
+      },
       "is_default": true,
       "created_at": "2026-04-21T09:00:00Z",
       "updated_at": "2026-04-21T09:00:00Z"
@@ -665,7 +683,8 @@ export const apiEndpoints = {
     responseFields: [
       { name: "slugs", type: "array", description: "Slug policy records available for generation." },
       { name: "slugs[].offline_enabled", type: "boolean", description: "Whether licenses under this slug can receive offline JWTs." },
-      { name: "slugs[].offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." }
+      { name: "slugs[].offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." },
+      { name: "slugs[].attributes", type: "object", description: "JSON object copied to generated licenses and exported as the JWT attributes claim." }
     ],
     errorCodes: [
       { status: 401, reason: "Missing or invalid management API key." },
@@ -685,7 +704,8 @@ export const apiEndpoints = {
       "Slug names must be lowercase URL-safe (a-z, 0-9, hyphen).",
       "Expiration policy must be one of forever, duration, or fixed_date.",
       "offline_enabled defaults to false unless explicitly set.",
-      "offline_token_lifetime_hours defaults to 24 unless explicitly set."
+      "offline_token_lifetime_hours defaults to 24 unless explicitly set.",
+      "attributes is an optional JSON object used for license information snapshots; defaults to {}."
     ],
     curl: `curl -sS http://localhost:8080/management/slugs \\
   -H "Authorization: Bearer management_key_dev_123456" \\
@@ -696,7 +716,11 @@ export const apiEndpoints = {
     "expiration_type": "duration",
     "expiration_days": 30,
     "offline_enabled": true,
-    "offline_token_lifetime_hours": 24
+    "offline_token_lifetime_hours": 24,
+    "attributes": {
+      "plan": "pro",
+      "features": ["analytics", "exports"]
+    }
   }'`,
     requestBody: `{
   "name": "pro-monthly",
@@ -704,7 +728,11 @@ export const apiEndpoints = {
   "expiration_type": "duration",
   "expiration_days": 30,
   "offline_enabled": true,
-  "offline_token_lifetime_hours": 24
+  "offline_token_lifetime_hours": 24,
+  "attributes": {
+    "plan": "pro",
+    "features": ["analytics", "exports"]
+  }
 }`,
     responseBody: `{
   "id": 2,
@@ -715,6 +743,10 @@ export const apiEndpoints = {
   "fixed_expires_at": null,
   "offline_enabled": true,
   "offline_token_lifetime_hours": 24,
+  "attributes": {
+    "plan": "pro",
+    "features": ["analytics", "exports"]
+  },
   "is_default": false,
   "created_at": "2026-04-21T12:00:00Z",
   "updated_at": "2026-04-21T12:00:00Z"
@@ -728,12 +760,13 @@ export const apiEndpoints = {
       { name: "fixed_expires_at", type: "string | null", description: "RFC3339 timestamp required when expiration_type is fixed_date." },
       { name: "offline_enabled", type: "boolean", description: "Whether licenses under this slug can receive offline JWTs." },
       { name: "offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." },
+      { name: "attributes", type: "object", description: "JSON object snapshotted to generated licenses and embedded in offline JWT attributes claim." },
       { name: "is_default", type: "boolean", description: "True only for the default slug." },
       { name: "created_at", type: "string", description: "RFC3339 creation timestamp." },
       { name: "updated_at", type: "string", description: "RFC3339 update timestamp." }
     ],
     errorCodes: [
-      { status: 400, reason: "Invalid JSON, invalid slug name, or invalid expiration policy fields." },
+      { status: 400, reason: "Invalid JSON, invalid slug name, invalid expiration policy fields, or invalid attributes shape." },
       { status: 401, reason: "Missing or invalid management API key." },
       { status: 409, reason: "Slug name already exists." },
       { status: 500, reason: "Unexpected server or storage error." }
@@ -764,6 +797,10 @@ export const apiEndpoints = {
   "fixed_expires_at": null,
   "offline_enabled": true,
   "offline_token_lifetime_hours": 24,
+  "attributes": {
+    "plan": "pro",
+    "features": ["analytics", "exports"]
+  },
   "is_default": false,
   "created_at": "2026-04-21T12:00:00Z",
   "updated_at": "2026-04-21T12:00:00Z"
@@ -773,7 +810,8 @@ export const apiEndpoints = {
       { name: "max_activations", type: "number", description: "Seat limit configured on this slug template." },
       { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Expiration policy mode." },
       { name: "offline_enabled", type: "boolean", description: "Whether this slug issues offline JWTs on valid activation/validation." },
-      { name: "offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." }
+      { name: "offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." },
+      { name: "attributes", type: "object", description: "JSON object snapshotted to generated licenses and embedded in offline JWT attributes claim." }
     ],
     errorCodes: [
       { status: 400, reason: "Invalid slug name format in path." },
@@ -793,6 +831,7 @@ export const apiEndpoints = {
     details: [
       "Requires management API key auth.",
       "At least one field must be provided.",
+      "attributes can be replaced with a new JSON object; set attributes to {} to clear values.",
       "Changing a slug only affects newly generated licenses. Existing licenses keep snapshotted policy values."
     ],
     curl: `curl -sS -X PATCH http://localhost:8080/management/slugs/pro-monthly \\
@@ -803,14 +842,22 @@ export const apiEndpoints = {
     "expiration_type": "fixed_date",
     "fixed_expires_at": "2027-01-01T00:00:00Z",
     "offline_enabled": true,
-    "offline_token_lifetime_hours": 48
+    "offline_token_lifetime_hours": 48,
+    "attributes": {
+      "plan": "enterprise",
+      "features": ["analytics", "sso", "audit"]
+    }
   }'`,
     requestBody: `{
   "max_activations": 5,
   "expiration_type": "fixed_date",
   "fixed_expires_at": "2027-01-01T00:00:00Z",
   "offline_enabled": true,
-  "offline_token_lifetime_hours": 48
+  "offline_token_lifetime_hours": 48,
+  "attributes": {
+    "plan": "enterprise",
+    "features": ["analytics", "sso", "audit"]
+  }
 }`,
     responseBody: `{
   "id": 2,
@@ -821,6 +868,10 @@ export const apiEndpoints = {
   "fixed_expires_at": "2027-01-01T00:00:00Z",
   "offline_enabled": true,
   "offline_token_lifetime_hours": 48,
+  "attributes": {
+    "plan": "enterprise",
+    "features": ["analytics", "sso", "audit"]
+  },
   "is_default": false,
   "created_at": "2026-04-21T12:00:00Z",
   "updated_at": "2026-04-21T12:30:00Z"
@@ -830,10 +881,11 @@ export const apiEndpoints = {
       { name: "max_activations", type: "number", description: "Updated seat limit for future generations." },
       { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Updated expiration policy mode." },
       { name: "offline_enabled", type: "boolean", description: "Updated offline JWT policy for this slug." },
-      { name: "offline_token_lifetime_hours", type: "number", description: "Updated offline JWT lifetime for this slug, in hours." }
+      { name: "offline_token_lifetime_hours", type: "number", description: "Updated offline JWT lifetime for this slug, in hours." },
+      { name: "attributes", type: "object", description: "Updated slug attributes for future license snapshots and offline JWT attributes claims." }
     ],
     errorCodes: [
-      { status: 400, reason: "Invalid path slug, invalid body, missing patch fields, or invalid expiration policy values." },
+      { status: 400, reason: "Invalid path slug, invalid body, missing patch fields, invalid expiration policy values, or invalid attributes shape." },
       { status: 401, reason: "Missing or invalid management API key." },
       { status: 404, reason: "Slug not found." },
       { status: 409, reason: "Slug name already exists." },

@@ -26,7 +26,7 @@ export default function ApiPage() {
       <h1>API Reference</h1>
       <p>
         Simple License Server has a small API surface: license lifecycle routes, management routes, and one health
-        endpoint.
+        endpoint. License generation responses include snapshotted slug <code>attributes</code> for downstream gating logic.
       </p>
 
       <h2 className="docs-reference-group-title">License Management</h2>

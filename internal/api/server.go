@@ -664,27 +664,35 @@ func validateSlugName(value string) error {
 }
 
 func validateMetadata(metadata map[string]any) error {
-	if metadata == nil {
+	return validateJSONMap(metadata, "metadata")
+}
+
+func validateAttributes(attributes map[string]any) error {
+	return validateJSONMap(attributes, "attributes")
+}
+
+func validateJSONMap(values map[string]any, label string) error {
+	if values == nil {
 		return nil
 	}
 
-	if len(metadata) > maxMetadataEntries {
-		return fmt.Errorf("metadata exceeds max entries of %d", maxMetadataEntries)
+	if len(values) > maxMetadataEntries {
+		return fmt.Errorf("%s exceeds max entries of %d", label, maxMetadataEntries)
 	}
 
 	nodes := 0
-	for key, value := range metadata {
+	for key, value := range values {
 		trimmedKey := strings.TrimSpace(key)
 		if trimmedKey == "" {
-			return fmt.Errorf("metadata keys must be non-empty")
+			return fmt.Errorf("%s keys must be non-empty", label)
 		}
 
 		if len(trimmedKey) > maxSlugLength {
-			return fmt.Errorf("metadata key %q exceeds max length of %d", trimmedKey, maxSlugLength)
+			return fmt.Errorf("%s key %q exceeds max length of %d", label, trimmedKey, maxSlugLength)
 		}
 
 		if err := validateMetadataValue(value, 1, &nodes); err != nil {
-			return fmt.Errorf("metadata value for key %q invalid: %w", trimmedKey, err)
+			return fmt.Errorf("%s value for key %q invalid: %w", label, trimmedKey, err)
 		}
 	}
 

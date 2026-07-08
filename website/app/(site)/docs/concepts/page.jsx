@@ -1,4 +1,5 @@
 import Link from "next/link";
+import CodeExample from "../../../../components/CodeExample";
 
 export const metadata = {
   title: "Concepts",
@@ -14,12 +15,12 @@ const glossaryRows = [
   {
     term: "Slug",
     meaning:
-      "Policy template for newly generated licenses. Controls max activations and expiration policy for licenses created under it."
+      "Policy template for newly generated licenses. Controls max activations, expiration policy, offline policy, and attributes for licenses created under it."
   },
   {
     term: "License",
     meaning:
-      "Issued key tied to a slug. Stores status, metadata, created time, and resolved expires_at."
+      "Issued key tied to a slug. Stores status, metadata, created time, resolved expires_at, and snapshotted slug attributes."
   },
   {
     term: "Seat",
@@ -67,6 +68,22 @@ const glossaryRows = [
       "License-level action that sets status to revoked and blocks future activate/validate calls."
   }
 ];
+
+const metadataVsAttributesExample = `{
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
+  "slug": "pro-eu",
+  "metadata": {
+    "email": "user@example.com",
+    "external_customer_id": "cus_123",
+    "external_order_id": "ord_456"
+  },
+  "attributes": {
+    "sku": "PRO-EU",
+    "edition": "pro",
+    "features": ["sync", "audit-log"],
+    "channel": "direct"
+  }
+}`;
 
 function GlossaryTable({ rows }) {
   return (
@@ -125,6 +142,7 @@ export default function ConceptsPage() {
           <li>Defines <code>max_activations</code> (seat limit).</li>
           <li>Defines expiration policy (<code>forever</code>, <code>duration</code>, or <code>fixed_date</code>).</li>
           <li>Defines whether offline JWTs are issued with <code>offline_enabled</code> and how long they last with <code>offline_token_lifetime_hours</code>.</li>
+          <li>Defines <code>attributes</code> (JSON object) for plan/features or other license information.</li>
           <li>Is resolved at generation time, then stored on the license record.</li>
           <li>Changing a slug later affects future licenses, not already-issued ones.</li>
         </ul>
@@ -134,6 +152,38 @@ export default function ConceptsPage() {
         <p style={{ marginTop: "0.7rem" }}>
           Want a deeper view of naming rules and policy snapshots? See <Link href="/docs/concepts/slugs/">Slug concepts</Link>.
         </p>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Metadata vs attributes</h3>
+        <p>
+          Both fields are JSON objects, but they come from different sources and serve different jobs.
+        </p>
+        <ul>
+          <li>
+            <code>metadata</code> on <code>POST /generate</code>: caller-provided license context persisted on the
+            license record (for example customer ids, order ids, support lookup fields).
+          </li>
+          <li>
+            <code>metadata</code> on <code>POST /activate</code>: fingerprint-level context stored on the activation
+            seat record when a new seat is created. It is not currently returned in license responses, webhook payloads,
+            or offline JWT claims.
+          </li>
+          <li>
+            Re-activating an already-active fingerprint refreshes validation timing, but does not overwrite existing
+            activation metadata.
+          </li>
+          <li>
+            <code>attributes</code>: slug-defined entitlement data (for example SKU, edition, features, channel)
+            snapshotted onto the license at generation time.
+          </li>
+          <li>
+            Slug changes later affect future licenses only; existing licenses keep the attributes snapshot they were
+            created with.
+          </li>
+        </ul>
+        <p>Example generated license payload:</p>
+        <CodeExample language="json" code={metadataVsAttributesExample} />
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>

@@ -40,6 +40,7 @@ export const slugAPI = {
     fixed_expires_at?: string
     offline_enabled?: boolean
     offline_token_lifetime_hours?: number
+    attributes?: Record<string, any>
   }) => managementApi.post('/slugs', data),
   update: (
     name: string,
@@ -51,6 +52,7 @@ export const slugAPI = {
       fixed_expires_at: string
       offline_enabled: boolean
       offline_token_lifetime_hours: number
+      attributes: Record<string, any>
     }>,
   ) => managementApi.patch(`/slugs/${encodeURIComponent(name)}`, data),
   delete: (name: string) => managementApi.delete(`/slugs/${encodeURIComponent(name)}`),

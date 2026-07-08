@@ -11,7 +11,7 @@ import (
 	"simple-license-server/internal/storage"
 )
 
-func (s *Server) issueOfflineToken(ctx context.Context, licenseID, slugName, fingerprint string, licenseExpiresAt *time.Time, lifetimeSeconds int) (string, error) {
+func (s *Server) issueOfflineToken(ctx context.Context, licenseID, slugName, fingerprint string, attributes map[string]any, licenseExpiresAt *time.Time, lifetimeSeconds int) (string, error) {
 	licenseID = strings.TrimSpace(licenseID)
 	slugName = strings.TrimSpace(slugName)
 	fingerprint = strings.TrimSpace(fingerprint)
@@ -51,6 +51,7 @@ func (s *Server) issueOfflineToken(ctx context.Context, licenseID, slugName, fin
 		Subject:     licenseID,
 		Slug:        slugName,
 		Fingerprint: fingerprint,
+		Attributes:  attributes,
 		ExpiresAt:   expiresAt,
 		IssuedAt:    now,
 	})

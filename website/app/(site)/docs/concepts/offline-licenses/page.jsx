@@ -15,6 +15,10 @@ const tokenExample = `{
   "sub": "5345c73e-e338-4f5d-8585-dc9eff7c84e5",
   "slug": "desktop-pro",
   "fingerprint": "abc123-machine-fingerprint",
+  "attributes": {
+    "plan": "pro",
+    "features": ["analytics", "exports"]
+  },
   "iat": 1777749983,
   "nbf": 1777749983,
   "exp": 1777836383,
@@ -72,6 +76,10 @@ export default function OfflineLicenseConceptsPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>JWT claims</h3>
         <p>Clients should validate the signature, expiration, issuer, and local fingerprint before trusting a token.</p>
+        <ul>
+          <li>Use the nested <code>attributes</code> object claim for feature gating or plan logic.</li>
+          <li>The <code>attributes</code> claim is a snapshot from the license at token-issuance time.</li>
+        </ul>
         <CodeExample language="json" code={tokenExample} />
       </div>
 

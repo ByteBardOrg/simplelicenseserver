@@ -52,6 +52,7 @@ func (s *Store) ListLicenses(ctx context.Context, params LicenseListParams) (Lic
 		       ) AS last_validated_at,
 		       l.revoked_at,
 		       l.metadata,
+		       l.attributes,
 		       s.name,
 		       s.offline_enabled,
 		       s.offline_token_lifetime_seconds,
@@ -154,6 +155,7 @@ func scanLicenseListRow(row licenseListScanner) (LicenseRow, error) {
 		lastValidatedAt sql.NullTime
 		revokedAt       sql.NullTime
 		metadataJSON    []byte
+		attributesJSON  []byte
 	)
 
 	err := row.Scan(
@@ -166,6 +168,7 @@ func scanLicenseListRow(row licenseListScanner) (LicenseRow, error) {
 		&lastValidatedAt,
 		&revokedAt,
 		&metadataJSON,
+		&attributesJSON,
 		&license.SlugName,
 		&license.OfflineEnabled,
 		&license.OfflineTokenLifetimeSeconds,
@@ -196,11 +199,18 @@ func scanLicenseListRow(row licenseListScanner) (LicenseRow, error) {
 	license.CreatedAt = license.CreatedAt.UTC()
 	if len(metadataJSON) == 0 {
 		license.Metadata = map[string]any{}
-		return license, nil
+	} else {
+		if err := json.Unmarshal(metadataJSON, &license.Metadata); err != nil {
+			return LicenseRow{}, fmt.Errorf("decode license metadata: %w", err)
+		}
 	}
 
-	if err := json.Unmarshal(metadataJSON, &license.Metadata); err != nil {
-		return LicenseRow{}, fmt.Errorf("decode license metadata: %w", err)
+	if len(attributesJSON) == 0 {
+		license.Attributes = map[string]any{}
+	} else {
+		if err := json.Unmarshal(attributesJSON, &license.Attributes); err != nil {
+			return LicenseRow{}, fmt.Errorf("decode license attributes: %w", err)
+		}
 	}
 
 	return license, nil

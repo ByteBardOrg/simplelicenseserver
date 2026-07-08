@@ -37,16 +37,16 @@ export const docsIndex = [
   {
     href: "/docs/concepts/offline-licenses/",
     title: "Offline License Concepts",
-    summary: "Per-slug offline JWTs, signing keys, token refresh, and public key export.",
+    summary: "Per-slug offline JWTs, attributes claims, signing keys, token refresh, and public key export.",
     icon: "bx-shield-quarter",
-    keywords: ["offline", "jwt", "signing keys", "ed25519", "public keys", "concepts"]
+    keywords: ["offline", "jwt", "attributes", "signing keys", "ed25519", "public keys", "concepts"]
   },
   {
     href: "/docs/concepts/slugs/",
     title: "Slug Concepts",
-    summary: "Slug naming rules, policy fields, and license snapshot behavior at generation time.",
+    summary: "Slug naming rules, attributes, policy fields, and license snapshot behavior at generation time.",
     icon: "bx-label",
-    keywords: ["slug", "policies", "max activations", "expiration", "concepts"]
+    keywords: ["slug", "attributes", "policies", "max activations", "expiration", "concepts"]
   },
   {
     href: "/docs/configuration/",
@@ -131,6 +131,13 @@ export const docsIndex = [
     summary: "Breaking changes and migration checklist for 0.2.0.",
     icon: "bx-git-compare",
     keywords: ["0.2.0", "0.1.0", "migration", "breaking changes"]
+  },
+  {
+    href: "/docs/migration/0-3-0-to-0-4-0/",
+    title: "0.3.0 -> 0.4.0",
+    summary: "Slug attributes snapshots, metadata behavior clarifications, and the new UI activation action.",
+    icon: "bx-git-compare",
+    keywords: ["0.4.0", "0.3.0", "migration", "attributes", "metadata", "jwt", "webhooks", "licenses", "activate", "ui"]
   },
   {
     href: "/docs/migration/0-2-0-to-0-3-0/",

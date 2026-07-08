@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -399,6 +400,7 @@ func TestValidateRefreshesOfflineTokenWhenSlugAllowsOffline(t *testing.T) {
 				Status:                      "active",
 				LicenseID:                   "8c50f4f7-761d-4bf1-8e09-27a5f7ea0a12",
 				Slug:                        "default",
+				Attributes:                  map[string]any{"features": []any{"analytics"}, "tier": "pro"},
 				OfflineEnabled:              true,
 				OfflineTokenLifetimeSeconds: 86400,
 			}, nil
@@ -438,6 +440,25 @@ func TestValidateRefreshesOfflineTokenWhenSlugAllowsOffline(t *testing.T) {
 	}
 	if strings.Count(response.Token, ".") != 2 {
 		t.Fatalf("expected JWT-shaped token, got %q", response.Token)
+	}
+
+	parts := strings.Split(response.Token, ".")
+	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode jwt claims: %v", err)
+	}
+
+	var claims map[string]any
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		t.Fatalf("unmarshal jwt claims: %v", err)
+	}
+
+	attributes, ok := claims["attributes"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected attributes object claim, got %T", claims["attributes"])
+	}
+	if attributes["tier"] != "pro" {
+		t.Fatalf("expected tier=pro in attributes, got %v", attributes)
 	}
 }
 
