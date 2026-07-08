@@ -44,6 +44,7 @@ type GeneratedLicense struct {
 	Slug       string
 	Status     string
 	Metadata   map[string]any
+	Attributes map[string]any
 	ExpiresAt  *time.Time
 	CreatedAt  time.Time
 }
@@ -82,6 +83,7 @@ type ActivationResult struct {
 	LicenseID                   string
 	LicenseKey                  string
 	Slug                        string
+	Attributes                  map[string]any
 	Fingerprint                 string
 	ExpiresAt                   *time.Time
 	OfflineEnabled              bool
@@ -94,6 +96,7 @@ type ValidationResult struct {
 	Status                      string
 	LicenseID                   string
 	Slug                        string
+	Attributes                  map[string]any
 	ExpiresAt                   *time.Time
 	OfflineEnabled              bool
 	OfflineTokenLifetimeSeconds int
@@ -187,6 +190,7 @@ type LicenseRow struct {
 	LastValidatedAt             *time.Time
 	RevokedAt                   *time.Time
 	Metadata                    map[string]any
+	Attributes                  map[string]any
 	SlugName                    string
 	OfflineEnabled              bool
 	OfflineTokenLifetimeSeconds int
@@ -202,6 +206,7 @@ type slugOptions struct {
 	MaxActivations              int
 	OfflineEnabled              bool
 	OfflineTokenLifetimeSeconds int
+	Attributes                  map[string]any
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -338,7 +343,7 @@ func generateLicenseWithQuerier(ctx context.Context, q queryable, slugName strin
 func loadSlugOptionsByName(ctx context.Context, q queryable, slugName string) (slugOptions, error) {
 	var options slugOptions
 	err := q.QueryRow(ctx, `
-		SELECT id, expiration_type, expiration_days, fixed_expires_at, max_activations, offline_enabled, offline_token_lifetime_seconds
+		SELECT id, expiration_type, expiration_days, fixed_expires_at, max_activations, offline_enabled, offline_token_lifetime_seconds, attributes
 		FROM slugs
 		WHERE name = $1
 		  AND deleted_at IS NULL
@@ -350,6 +355,7 @@ func loadSlugOptionsByName(ctx context.Context, q queryable, slugName string) (s
 		&options.MaxActivations,
 		&options.OfflineEnabled,
 		&options.OfflineTokenLifetimeSeconds,
+		&options.Attributes,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -388,6 +394,11 @@ func createLicenseFromSlugOptions(ctx context.Context, q queryable, slugName str
 		return GeneratedLicense{}, err
 	}
 
+	attributesJSON, err := metadataToJSON(options.Attributes)
+	if err != nil {
+		return GeneratedLicense{}, fmt.Errorf("marshal attributes: %w", err)
+	}
+
 	var createdAt time.Time
 	licenseKey := ""
 	for i := 0; i < 8; i++ {
@@ -397,10 +408,10 @@ func createLicenseFromSlugOptions(ctx context.Context, q queryable, slugName str
 		}
 
 		err = q.QueryRow(ctx, `
-			INSERT INTO licenses (key, slug_id, status, metadata, expires_at, max_activations)
-			VALUES ($1, $2, 'inactive', $3, $4, $5)
+			INSERT INTO licenses (key, slug_id, status, metadata, attributes, expires_at, max_activations)
+			VALUES ($1, $2, 'inactive', $3, $4, $5, $6)
 			RETURNING created_at
-		`, licenseKey, options.SlugID, metadataJSON, expiresAt, options.MaxActivations).Scan(&createdAt)
+		`, licenseKey, options.SlugID, metadataJSON, attributesJSON, expiresAt, options.MaxActivations).Scan(&createdAt)
 		if err == nil {
 			break
 		}
@@ -419,6 +430,7 @@ func createLicenseFromSlugOptions(ctx context.Context, q queryable, slugName str
 		Slug:       slugName,
 		Status:     "inactive",
 		Metadata:   copyMetadata(metadata),
+		Attributes: copyMetadata(options.Attributes),
 		ExpiresAt:  expiresAt,
 		CreatedAt:  createdAt.UTC(),
 	}, nil
@@ -449,6 +461,7 @@ func marshalGenerateResponseBody(generated GeneratedLicense) ([]byte, error) {
 		Slug       string         `json:"slug"`
 		Status     string         `json:"status"`
 		Metadata   map[string]any `json:"metadata"`
+		Attributes map[string]any `json:"attributes"`
 		ExpiresAt  *time.Time     `json:"expires_at"`
 		CreatedAt  time.Time      `json:"created_at"`
 	}{
@@ -456,6 +469,7 @@ func marshalGenerateResponseBody(generated GeneratedLicense) ([]byte, error) {
 		Slug:       generated.Slug,
 		Status:     generated.Status,
 		Metadata:   generated.Metadata,
+		Attributes: generated.Attributes,
 		ExpiresAt:  generated.ExpiresAt,
 		CreatedAt:  generated.CreatedAt,
 	}
@@ -535,6 +549,7 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 			LicenseID:                   license.ID,
 			LicenseKey:                  license.Key,
 			Slug:                        license.SlugName,
+			Attributes:                  copyMetadata(license.Attributes),
 			Fingerprint:                 fingerprint,
 			ExpiresAt:                   license.ExpiresAt,
 			OfflineEnabled:              license.OfflineEnabled,
@@ -614,6 +629,7 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 		LicenseID:                   license.ID,
 		LicenseKey:                  license.Key,
 		Slug:                        license.SlugName,
+		Attributes:                  copyMetadata(license.Attributes),
 		Fingerprint:                 fingerprint,
 		ExpiresAt:                   license.ExpiresAt,
 		OfflineEnabled:              license.OfflineEnabled,
@@ -655,6 +671,7 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 			Status:                      string(decision.Status),
 			LicenseID:                   license.ID,
 			Slug:                        license.SlugName,
+			Attributes:                  copyMetadata(license.Attributes),
 			ExpiresAt:                   license.ExpiresAt,
 			OfflineEnabled:              license.OfflineEnabled,
 			OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
@@ -699,6 +716,7 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 		Status:                      string(aggregate.Status()),
 		LicenseID:                   license.ID,
 		Slug:                        license.SlugName,
+		Attributes:                  copyMetadata(license.Attributes),
 		ExpiresAt:                   license.ExpiresAt,
 		OfflineEnabled:              license.OfflineEnabled,
 		OfflineTokenLifetimeSeconds: license.OfflineTokenLifetimeSeconds,
@@ -1341,6 +1359,7 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 		       l.activated_at,
 		       l.revoked_at,
 		       l.metadata,
+		       l.attributes,
 		       s.name,
 		       s.offline_enabled,
 		       s.offline_token_lifetime_seconds
@@ -1353,8 +1372,9 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 	}
 
 	var (
-		metadataBytes []byte
-		row           LicenseRow
+		metadataBytes   []byte
+		attributesBytes []byte
+		row             LicenseRow
 	)
 
 	err := tx.QueryRow(ctx, query, key).Scan(
@@ -1367,6 +1387,7 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 		&row.ActivatedAt,
 		&row.RevokedAt,
 		&metadataBytes,
+		&attributesBytes,
 		&row.SlugName,
 		&row.OfflineEnabled,
 		&row.OfflineTokenLifetimeSeconds,
@@ -1380,11 +1401,18 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 
 	if len(metadataBytes) == 0 {
 		row.Metadata = map[string]any{}
-		return row, nil
+	} else {
+		if err := json.Unmarshal(metadataBytes, &row.Metadata); err != nil {
+			return LicenseRow{}, fmt.Errorf("decode metadata json: %w", err)
+		}
 	}
 
-	if err := json.Unmarshal(metadataBytes, &row.Metadata); err != nil {
-		return LicenseRow{}, fmt.Errorf("decode metadata json: %w", err)
+	if len(attributesBytes) == 0 {
+		row.Attributes = map[string]any{}
+	} else {
+		if err := json.Unmarshal(attributesBytes, &row.Attributes); err != nil {
+			return LicenseRow{}, fmt.Errorf("decode attributes json: %w", err)
+		}
 	}
 
 	return row, nil

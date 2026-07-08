@@ -1,6 +1,6 @@
 # Simple License Server API
 
-Current API version: `0.2.0`
+Current API version: `0.4.0`
 
 This repository contains the Go API implementation for the license and management flows described in `simple-license-server.md`.
 
@@ -116,6 +116,9 @@ Rate limiting defaults:
 Offline token defaults:
 
 - Offline JWT issuance is controlled per slug with `offline_enabled` and `offline_token_lifetime_hours`.
+- Slugs also support `attributes` (JSON object) for license information such as feature flags or plan metadata.
+- Slug `attributes` are snapshotted onto each generated license and returned by `/generate` and management license listing endpoints.
+- Offline JWTs include the snapshotted license `attributes` as a nested `attributes` claim.
 - All slugs, including the seeded `default` slug, default to offline disabled.
 - `POST /activate` and valid `POST /validate` responses include `token` only when the license slug has offline enabled and an active signing key exists.
 - `OFFLINE_SIGNING_ENCRYPTION_KEY` encrypts signing private keys at rest and must be at least 32 characters before creating or using signing keys.

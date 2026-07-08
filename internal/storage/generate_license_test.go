@@ -37,6 +37,7 @@ func (r stubRow) Scan(dest ...any) error {
 func TestGenerateLicenseWithQuerierSnapshotsDurationSlugPolicy(t *testing.T) {
 	createdAt := time.Date(2026, 4, 21, 12, 0, 0, 0, time.UTC)
 	metadata := map[string]any{"email": "user@example.com"}
+	slugAttributes := map[string]any{"features": []any{"analytics", "export"}, "tier": "pro"}
 
 	callCount := 0
 	q := stubQueryable{queryRowFn: func(_ context.Context, _ string, args ...any) pgx.Row {
@@ -49,12 +50,15 @@ func TestGenerateLicenseWithQuerierSnapshotsDurationSlugPolicy(t *testing.T) {
 				*dest[2].(*sql.NullInt32) = sql.NullInt32{Int32: 30, Valid: true}
 				*dest[3].(*sql.NullTime) = sql.NullTime{}
 				*dest[4].(*int) = 7
+				*dest[5].(*bool) = true
+				*dest[6].(*int) = 86400
+				*dest[7].(*map[string]any) = slugAttributes
 				return nil
 			}}
 		case 2:
 			return stubRow{scanFn: func(dest ...any) error {
-				if len(args) != 5 {
-					t.Fatalf("expected 5 insert args, got %d", len(args))
+				if len(args) != 6 {
+					t.Fatalf("expected 6 insert args, got %d", len(args))
 				}
 
 				key, ok := args[0].(string)
@@ -85,9 +89,22 @@ func TestGenerateLicenseWithQuerierSnapshotsDurationSlugPolicy(t *testing.T) {
 					t.Fatalf("unexpected metadata %v", metadataDecoded)
 				}
 
-				expiresAt, ok := args[3].(*time.Time)
+				attributesJSON, ok := args[3].([]byte)
+				if !ok {
+					t.Fatalf("expected attributes []byte, got %T", args[3])
+				}
+
+				var attributesDecoded map[string]any
+				if err := json.Unmarshal(attributesJSON, &attributesDecoded); err != nil {
+					t.Fatalf("unmarshal attributes: %v", err)
+				}
+				if attributesDecoded["tier"] != "pro" {
+					t.Fatalf("unexpected attributes %v", attributesDecoded)
+				}
+
+				expiresAt, ok := args[4].(*time.Time)
 				if !ok || expiresAt == nil {
-					t.Fatalf("expected expires_at *time.Time, got %T (%v)", args[3], args[3])
+					t.Fatalf("expected expires_at *time.Time, got %T (%v)", args[4], args[4])
 				}
 
 				remaining := time.Until(*expiresAt)
@@ -95,9 +112,9 @@ func TestGenerateLicenseWithQuerierSnapshotsDurationSlugPolicy(t *testing.T) {
 					t.Fatalf("expected duration-based expiration around 30 days, got %s", remaining)
 				}
 
-				maxActivations, ok := args[4].(int)
+				maxActivations, ok := args[5].(int)
 				if !ok || maxActivations != 7 {
-					t.Fatalf("expected max_activations 7, got %v (%T)", args[4], args[4])
+					t.Fatalf("expected max_activations 7, got %v (%T)", args[5], args[5])
 				}
 
 				*dest[0].(*time.Time) = createdAt
@@ -120,6 +137,10 @@ func TestGenerateLicenseWithQuerierSnapshotsDurationSlugPolicy(t *testing.T) {
 
 	if generated.Status != "inactive" {
 		t.Fatalf("expected inactive status, got %q", generated.Status)
+	}
+
+	if generated.Attributes["tier"] != "pro" {
+		t.Fatalf("expected snapshotted attributes, got %v", generated.Attributes)
 	}
 
 	if generated.ExpiresAt == nil {
