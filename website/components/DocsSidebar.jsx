@@ -21,6 +21,7 @@ const supportLinks = [
 
 const conceptLinks = [
   { href: "/docs/concepts/slugs/", title: "Slugs" },
+  { href: "/docs/concepts/management-ui/", title: "Management UI" },
   { href: "/docs/concepts/webhooks/", title: "Webhooks" },
   { href: "/docs/concepts/offline-licenses/", title: "Offline Licenses" }
 ];

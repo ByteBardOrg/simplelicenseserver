@@ -53,6 +53,11 @@ const glossaryRows = [
       "Operator/internal endpoints under /management/* that require a management bootstrap key."
   },
   {
+    term: "Management UI",
+    meaning:
+      "Optional bundled operator console served from /ui/ when UI_ENABLED=true. It uses a management API key for operator actions."
+  },
+  {
     term: "Runtime API",
     meaning:
       "Client-facing endpoints (/activate, /validate, /deactivate) used by your shipped app."
@@ -227,9 +232,20 @@ export default function ConceptsPage() {
             <strong>Management API</strong>: <code>/management/slugs</code>, <code>/management/api-keys</code>, and
             <code> /management/webhooks</code> routes for operator tooling and frontend-backed workflows.
           </li>
-          <li>Never call key-protected routes directly from browser code.</li>
+          <li>Never call key-protected routes directly from customer-facing browser code.</li>
           <li>For payment webhooks, use provider event id as <code>Idempotency-Key</code> on <code>/generate</code>.</li>
         </ul>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Management UI</h3>
+        <p>
+          The bundled operator console is available at <code>/ui/</code> when <code>UI_ENABLED=true</code>. It provides a
+          browser interface for license, slug, API key, webhook, and offline-license management.
+        </p>
+        <p style={{ marginTop: "0.7rem" }}>
+          For access, authentication, and deployment notes, see <Link href="/docs/concepts/management-ui/">Management UI concepts</Link>.
+        </p>
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>

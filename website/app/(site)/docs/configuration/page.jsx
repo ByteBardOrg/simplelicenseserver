@@ -48,7 +48,7 @@ const optionRows = [
     name: "UI_ENABLED",
     required: "No",
     defaultValue: "false",
-    description: "Serve the bundled management console from the API server when true. The Docker image includes the UI assets."
+    description: "Serve the bundled management console from /ui/ on the API server when true. The Docker image includes the UI assets."
   },
   {
     name: "REQUEST_TIMEOUT",
@@ -205,7 +205,7 @@ export default function ConfigurationPage() {
         <ul>
           <li><code>*</code> One of <code>MANAGEMENT_API_KEYS</code> or <code>MANAGEMENT_API_KEY</code> must be set.</li>
           <li>All API keys must be at least 16 characters.</li>
-          <li>Set <code>UI_ENABLED=true</code> to serve the bundled console included in the Docker image.</li>
+          <li>Set <code>UI_ENABLED=true</code> to serve the bundled console at <code>/ui/</code>; <code>/ui</code> redirects there.</li>
           <li>Use <code>POST /management/api-keys</code> to create generated server API keys for <code>/generate</code> and <code>/revoke</code>.</li>
           <li>All timeout values must be valid Go durations (for example <code>15s</code>, <code>10m</code>).</li>
           <li>When <code>RATE_LIMIT_ENABLED=true</code>, all rate-limit numeric values must be greater than zero.</li>

@@ -49,6 +49,13 @@ export const docsIndex = [
     keywords: ["slug", "attributes", "policies", "max activations", "expiration", "concepts"]
   },
   {
+    href: "/docs/concepts/management-ui/",
+    title: "Management UI Concepts",
+    summary: "Enable and access the bundled operator console at /ui/.",
+    icon: "bx-window-alt",
+    keywords: ["management ui", "ui", "console", "dashboard", "/ui", "/ui/", "operator", "UI_ENABLED"]
+  },
+  {
     href: "/docs/configuration/",
     title: "Configuration",
     summary: "All environment variables, defaults, and validation behavior.",
