@@ -4,19 +4,17 @@ import { ChevronLeft, ChevronRight, KeyRound, Plus, Search } from 'lucide-vue-ne
 import PageHeader from '@/components/PageHeader.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import CopyButton from '@/components/CopyButton.vue'
-import ConfirmButton from '@/components/ConfirmButton.vue'
-import UiDrawer from '@/components/UiDrawer.vue'
+import LicenseDrawer from '@/components/LicenseDrawer.vue'
 import { licensesAPI } from '@/stores/api'
-import { openIssueDrawer, toast, toastError, ui } from '@/lib/ui'
-import { errorMessage, formatDate, formatLifetime, formatRelative, hasKeys, prettyJSON } from '@/lib/format'
+import { openIssueDrawer, ui } from '@/lib/ui'
+import { errorMessage, formatDate, formatRelative } from '@/lib/format'
 
 const PAGE_SIZE = 15
 
 const licenses = ref([])
 const loading = ref(false)
 const loadError = ref('')
-const selected = ref(null)
-const revoking = ref(false)
+const selectedKey = ref('')
 
 const query = ref('')
 const status = ref('')
@@ -54,9 +52,6 @@ const load = async () => {
     licenses.value = res.data.licenses || []
     Object.assign(pagination, res.data.pagination || {})
     Object.assign(counts, res.data.counts || {})
-    if (selected.value) {
-      selected.value = licenses.value.find((license) => license.id === selected.value.id) || selected.value
-    }
   } catch (err) {
     loadError.value = errorMessage(err, 'Failed to load licenses')
   } finally {
@@ -85,20 +80,6 @@ const goToPage = (next) => {
   load()
 }
 
-const revoke = async () => {
-  if (!selected.value) return
-  revoking.value = true
-  try {
-    await licensesAPI.revoke({ license_key: selected.value.license_key })
-    toast('License revoked')
-    await load()
-  } catch (err) {
-    toastError(errorMessage(err, 'Could not revoke license'))
-  } finally {
-    revoking.value = false
-  }
-}
-
 const seatPercent = (license) => {
   const max = Number(license.max_activations || 0)
   if (max <= 0) return 0
@@ -111,7 +92,7 @@ onMounted(load)
 
 <template>
   <div>
-    <PageHeader title="Licenses" description="Every key you have issued. Click a row for details or to revoke it." />
+    <PageHeader title="Licenses" description="Every key you have issued. Click a row to see its devices, change its limits, or revoke it." />
 
     <div class="mt-8 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div class="flex gap-1 overflow-x-auto rounded-xl bg-surface-low/80 p-1 shadow-ghost">
@@ -168,7 +149,7 @@ onMounted(load)
             </tr>
           </thead>
           <tbody>
-            <tr v-for="license in licenses" :key="license.id" class="is-clickable group" @click="selected = license">
+            <tr v-for="license in licenses" :key="license.id" class="is-clickable group" @click="selectedKey = license.license_key">
               <td class="w-full max-w-0 sm:min-w-[15rem]">
                 <div class="flex items-center gap-1">
                   <span class="truncate font-mono text-[0.8rem] text-ink">{{ license.license_key }}</span>
@@ -204,69 +185,6 @@ onMounted(load)
       </div>
     </section>
 
-    <UiDrawer :open="Boolean(selected)" title="License" @close="selected = null">
-      <template v-if="selected">
-        <div class="rounded-xl bg-surface-lowest p-4 shadow-ghost">
-          <div class="flex items-start justify-between gap-3">
-            <p class="break-all font-mono text-[0.9rem] font-medium leading-relaxed text-primary">{{ selected.license_key }}</p>
-            <CopyButton :value="selected.license_key" class="-mr-1 -mt-1" />
-          </div>
-          <div class="mt-3"><StatusBadge :status="selected.status" /></div>
-        </div>
-
-        <dl class="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 text-sm">
-          <div>
-            <dt class="eyebrow">Slug</dt>
-            <dd class="mt-1 text-ink">{{ selected.slug }}</dd>
-          </div>
-          <div>
-            <dt class="eyebrow">Seats in use</dt>
-            <dd class="mt-1 tabular-nums text-ink">{{ selected.active_seats }} of {{ selected.max_activations }}</dd>
-          </div>
-          <div>
-            <dt class="eyebrow">Created</dt>
-            <dd class="mt-1 text-ink">{{ formatDate(selected.created_at) }}</dd>
-          </div>
-          <div>
-            <dt class="eyebrow">Expires</dt>
-            <dd class="mt-1 text-ink">{{ formatDate(selected.expires_at, 'Never') }}</dd>
-          </div>
-          <div>
-            <dt class="eyebrow">Last validated</dt>
-            <dd class="mt-1 text-ink">{{ formatRelative(selected.last_validated_at) }}</dd>
-          </div>
-          <div v-if="selected.revoked_at">
-            <dt class="eyebrow">Revoked</dt>
-            <dd class="mt-1 text-critical">{{ formatDate(selected.revoked_at) }}</dd>
-          </div>
-          <div v-else-if="selected.offline_enabled">
-            <dt class="eyebrow">Offline tokens</dt>
-            <dd class="mt-1 text-ink">{{ formatLifetime(selected.offline_token_lifetime_hours) }}</dd>
-          </div>
-        </dl>
-
-        <div v-if="hasKeys(selected.metadata)" class="mt-7">
-          <p class="eyebrow">Metadata</p>
-          <pre class="code-block mt-2">{{ prettyJSON(selected.metadata) }}</pre>
-        </div>
-
-        <div v-if="hasKeys(selected.attributes)" class="mt-6">
-          <p class="eyebrow">Attributes</p>
-          <pre class="code-block mt-2">{{ prettyJSON(selected.attributes) }}</pre>
-        </div>
-      </template>
-
-      <template #footer>
-        <button class="btn-ghost" @click="selected = null">Close</button>
-        <ConfirmButton
-          v-if="selected && selected.status !== 'revoked'"
-          class="ml-auto"
-          label="Revoke license"
-          confirm-label="Confirm revoke"
-          :disabled="revoking"
-          @confirm="revoke"
-        />
-      </template>
-    </UiDrawer>
+    <LicenseDrawer :license-key="selectedKey" @close="selectedKey = ''" />
   </div>
 </template>

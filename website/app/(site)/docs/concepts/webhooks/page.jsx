@@ -95,6 +95,16 @@ const webhookContractExamples = {
     "status": "revoked",
     "revoked_at": "2026-04-21T12:10:00Z"
   }
+}`,
+  updated: `{
+  "type": "license.updated",
+  "data": {
+    "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
+    "status": "active",
+    "max_activations": 5,
+    "expires_at": "2028-10-20T23:59:59Z",
+    "revoked_at": null
+  }
 }`
 };
 
@@ -145,6 +155,10 @@ export default function WebhookConceptsPage() {
           </article>
           <article className="api-endpoint-prose">
             <h4>license.deactivated</h4>
+            <p>
+              Sent when an app calls <code>POST /api/v1/deactivate</code>, and when an operator removes a device, in which
+              case <code>reason</code> is <code>removed_by_admin</code>.
+            </p>
             <CodeExample language="json" code={webhookContractExamples.deactivated} />
           </article>
           <article className="api-endpoint-prose">
@@ -157,7 +171,16 @@ export default function WebhookConceptsPage() {
           </article>
           <article className="api-endpoint-prose">
             <h4>license.revoked</h4>
+            <p>Sent by <code>POST /api/v1/revoke</code> and by an operator revoking through the management API.</p>
             <CodeExample language="json" code={webhookContractExamples.revoked} />
+          </article>
+          <article className="api-endpoint-prose">
+            <h4>license.updated</h4>
+            <p>
+              Sent when an operator changes a license with <code>PATCH /management/licenses/{"{key}"}</code>: a new seat
+              limit, a new expiry, or restoring a revoked license.
+            </p>
+            <CodeExample language="json" code={webhookContractExamples.updated} />
           </article>
         </div>
       </div>

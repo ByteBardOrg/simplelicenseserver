@@ -61,7 +61,7 @@ export default function ManagementApiPage() {
       <p>
         These routes are for internal tooling: license inspection, slug policies, generated server API keys, webhook
         endpoint configuration/logs, and offline license signing keys. Slug routes include <code>attributes</code>
-        configuration that is snapshotted onto generated licenses. License generation and revocation stay on <code>/generate</code> and <code>/revoke</code>.
+        configuration that is snapshotted onto generated licenses. License generation and revocation stay on <code>/api/v1/generate</code> and <code>/api/v1/revoke</code>.
       </p>
 
       {managementConceptSections.map((section) => {

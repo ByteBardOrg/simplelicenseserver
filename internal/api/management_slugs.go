@@ -22,6 +22,7 @@ type slugResponse struct {
 	OfflineEnabled            bool           `json:"offline_enabled"`
 	OfflineTokenLifetimeHours int            `json:"offline_token_lifetime_hours"`
 	Attributes                map[string]any `json:"attributes"`
+	Product                   *string        `json:"product"`
 	IsDefault                 bool           `json:"is_default"`
 	DeletedAt                 *time.Time     `json:"deleted_at"`
 	CreatedAt                 time.Time      `json:"created_at"`
@@ -41,6 +42,7 @@ type createSlugRequest struct {
 	OfflineEnabled            bool           `json:"offline_enabled"`
 	OfflineTokenLifetimeHours *int           `json:"offline_token_lifetime_hours"`
 	Attributes                map[string]any `json:"attributes"`
+	Product                   *string        `json:"product"`
 }
 
 type updateSlugRequest struct {
@@ -52,6 +54,7 @@ type updateSlugRequest struct {
 	OfflineEnabled            *bool          `json:"offline_enabled"`
 	OfflineTokenLifetimeHours *int           `json:"offline_token_lifetime_hours"`
 	Attributes                map[string]any `json:"attributes"`
+	Product                   *string        `json:"product"`
 }
 
 func (s *Server) handleListSlugs(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +135,11 @@ func (s *Server) handleCreateSlug(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
+	product, err := normalizeProduct(req.Product)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
 
 	record, err := s.service.CreateSlug(r.Context(), storage.CreateSlugParams{
 		Name:                        req.Name,
@@ -142,6 +150,7 @@ func (s *Server) handleCreateSlug(w http.ResponseWriter, r *http.Request) {
 		OfflineEnabled:              req.OfflineEnabled,
 		OfflineTokenLifetimeSeconds: offlineTokenLifetimeHours * 3600,
 		Attributes:                  req.Attributes,
+		Product:                     product,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrConflict) {
@@ -178,7 +187,7 @@ func (s *Server) handleUpdateSlug(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == nil && req.MaxActivations == nil && req.ExpirationType == nil && req.ExpirationDays == nil && req.FixedExpiresAt == nil && req.OfflineEnabled == nil && req.OfflineTokenLifetimeHours == nil && req.Attributes == nil {
+	if req.Name == nil && req.MaxActivations == nil && req.ExpirationType == nil && req.ExpirationDays == nil && req.FixedExpiresAt == nil && req.OfflineEnabled == nil && req.OfflineTokenLifetimeHours == nil && req.Attributes == nil && req.Product == nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "at least one field must be provided"})
 		return
 	}
@@ -187,6 +196,16 @@ func (s *Server) handleUpdateSlug(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
 		}
+	}
+
+	var productParam *string
+	if req.Product != nil {
+		product, err := normalizeProduct(req.Product)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		productParam = &product
 	}
 
 	resolvedName := current.Name
@@ -260,6 +279,7 @@ func (s *Server) handleUpdateSlug(w http.ResponseWriter, r *http.Request) {
 		OfflineEnabled:              req.OfflineEnabled,
 		OfflineTokenLifetimeSeconds: offlineTokenLifetimeSeconds,
 		Attributes:                  req.Attributes,
+		Product:                     productParam,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -312,11 +332,29 @@ func mapSlugResponse(record storage.SlugRecord) slugResponse {
 		OfflineEnabled:            record.OfflineEnabled,
 		OfflineTokenLifetimeHours: offlineTokenLifetimeHoursFromSeconds(record.OfflineTokenLifetimeSeconds),
 		Attributes:                record.Attributes,
+		Product:                   optionalString(record.Product),
 		IsDefault:                 record.IsDefault,
 		DeletedAt:                 record.DeletedAt,
 		CreatedAt:                 record.CreatedAt,
 		UpdatedAt:                 record.UpdatedAt,
 	}
+}
+
+// normalizeProduct trims the optional product label; empty (or null) clears it.
+func normalizeProduct(raw *string) (string, error) {
+	if raw == nil {
+		return "", nil
+	}
+	product := strings.TrimSpace(*raw)
+	if err := validateOptionalFieldLength(product, "product", maxProductLength); err != nil {
+		return "", err
+	}
+	for _, r := range product {
+		if r < 0x20 || r == 0x7f {
+			return "", fmt.Errorf("product must not contain control characters")
+		}
+	}
+	return product, nil
 }
 
 func validateSlugPathName(name string) error {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -64,7 +65,7 @@ func TestIntegrationLicenseLifecycleFlow(t *testing.T) {
 		t.Fatalf("expected non-empty generated api key")
 	}
 
-	generateRes := doJSONRequest(t, handler, http.MethodPost, "/generate", generateRequest{
+	generateRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/generate", generateRequest{
 		Slug:     "default",
 		Metadata: map[string]any{"test_case": "integration_lifecycle_flow"},
 	}, map[string]string{
@@ -82,7 +83,7 @@ func TestIntegrationLicenseLifecycleFlow(t *testing.T) {
 		t.Fatalf("expected generated status inactive, got %q", generated.Status)
 	}
 
-	activateRes := doJSONRequest(t, handler, http.MethodPost, "/activate", activateRequest{
+	activateRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/activate", activateRequest{
 		LicenseKey:  generated.LicenseKey,
 		Fingerprint: fingerprint,
 		Metadata:    map[string]any{"source": "integration-test"},
@@ -91,15 +92,18 @@ func TestIntegrationLicenseLifecycleFlow(t *testing.T) {
 		t.Fatalf("expected activate status %d, got %d body=%s", http.StatusOK, activateRes.Code, activateRes.Body.String())
 	}
 
-	activated := decodeJSONResponse[activateResponse](t, activateRes)
+	activated := decodeJSONResponse[publicLicenseResponse](t, activateRes)
 	if !activated.Valid {
 		t.Fatalf("expected activation to be valid, got %+v", activated)
 	}
-	if activated.Status != "active" {
-		t.Fatalf("expected activated status active, got %q", activated.Status)
+	if activated.License == nil || activated.License.Status != "active" || activated.License.Seats.Used != 1 {
+		t.Fatalf("expected active license with one seat used, got %s", activateRes.Body.String())
+	}
+	if strings.Contains(activateRes.Body.String(), "metadata") {
+		t.Fatalf("public response must not expose metadata: %s", activateRes.Body.String())
 	}
 
-	validateBeforeRevokeRes := doJSONRequest(t, handler, http.MethodPost, "/validate", validateRequest{
+	validateBeforeRevokeRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/validate", validateRequest{
 		LicenseKey:  generated.LicenseKey,
 		Fingerprint: fingerprint,
 	}, nil)
@@ -107,12 +111,12 @@ func TestIntegrationLicenseLifecycleFlow(t *testing.T) {
 		t.Fatalf("expected validate-before-revoke status %d, got %d body=%s", http.StatusOK, validateBeforeRevokeRes.Code, validateBeforeRevokeRes.Body.String())
 	}
 
-	validatedBeforeRevoke := decodeJSONResponse[validateResponse](t, validateBeforeRevokeRes)
-	if !validatedBeforeRevoke.Valid || validatedBeforeRevoke.Status != "active" {
+	validatedBeforeRevoke := decodeJSONResponse[publicLicenseResponse](t, validateBeforeRevokeRes)
+	if !validatedBeforeRevoke.Valid || validatedBeforeRevoke.License.Status != "active" {
 		t.Fatalf("expected valid active license before revoke, got %+v", validatedBeforeRevoke)
 	}
 
-	revokeRes := doJSONRequest(t, handler, http.MethodPost, "/revoke", revokeRequest{
+	revokeRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/revoke", revokeRequest{
 		LicenseKey: generated.LicenseKey,
 	}, map[string]string{
 		"Authorization": "Bearer " + createdAPIKey.APIKey,
@@ -129,7 +133,7 @@ func TestIntegrationLicenseLifecycleFlow(t *testing.T) {
 		t.Fatalf("expected revoked status revoked, got %q", revoked.Status)
 	}
 
-	validateAfterRevokeRes := doJSONRequest(t, handler, http.MethodPost, "/validate", validateRequest{
+	validateAfterRevokeRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/validate", validateRequest{
 		LicenseKey:  generated.LicenseKey,
 		Fingerprint: fingerprint,
 	}, nil)
@@ -137,15 +141,86 @@ func TestIntegrationLicenseLifecycleFlow(t *testing.T) {
 		t.Fatalf("expected validate-after-revoke status %d, got %d body=%s", http.StatusOK, validateAfterRevokeRes.Code, validateAfterRevokeRes.Body.String())
 	}
 
-	validatedAfterRevoke := decodeJSONResponse[validateResponse](t, validateAfterRevokeRes)
+	validatedAfterRevoke := decodeJSONResponse[publicLicenseResponse](t, validateAfterRevokeRes)
 	if validatedAfterRevoke.Valid {
 		t.Fatalf("expected revoked license to be invalid, got %+v", validatedAfterRevoke)
 	}
-	if validatedAfterRevoke.Status != "revoked" {
-		t.Fatalf("expected revoked status after revoke, got %q", validatedAfterRevoke.Status)
+	if validatedAfterRevoke.License == nil || validatedAfterRevoke.License.Status != "revoked" {
+		t.Fatalf("expected revoked status after revoke, got %s", validateAfterRevokeRes.Body.String())
 	}
-	if validatedAfterRevoke.Reason != "revoked" {
-		t.Fatalf("expected revoked reason after revoke, got %q", validatedAfterRevoke.Reason)
+	if validatedAfterRevoke.Reason == nil || *validatedAfterRevoke.Reason != "revoked" {
+		t.Fatalf("expected revoked reason after revoke, got %s", validateAfterRevokeRes.Body.String())
+	}
+
+	adminHeaders := map[string]string{"Authorization": "Bearer " + managementKey}
+	licensePath := "/management/licenses/" + generated.LicenseKey
+
+	// Restore the revoked license and raise its seat count; the existing device comes back with it.
+	restoreRes := doJSONRequest(t, handler, http.MethodPatch, licensePath, map[string]any{
+		"revoked":         false,
+		"max_activations": 5,
+		"expires_at":      nil,
+	}, adminHeaders)
+	if restoreRes.Code != http.StatusOK {
+		t.Fatalf("expected restore status 200, got %d body=%s", restoreRes.Code, restoreRes.Body.String())
+	}
+	restored := decodeJSONResponse[licenseDetailResponse](t, restoreRes)
+	if restored.Status != "active" || restored.MaxActivations != 5 || restored.RevokedAt != nil || restored.ExpiresAt != nil {
+		t.Fatalf("unexpected restored license: %s", restoreRes.Body.String())
+	}
+	if len(restored.Activations) != 1 || restored.Activations[0].Fingerprint != fingerprint {
+		t.Fatalf("expected the original activation to be listed, got %s", restoreRes.Body.String())
+	}
+
+	// An operator frees the device's seat; the device is then no longer valid.
+	removeRes := doJSONRequest(t, handler, http.MethodDelete, fmt.Sprintf("%s/activations/%d", licensePath, restored.Activations[0].ID), nil, adminHeaders)
+	if removeRes.Code != http.StatusOK {
+		t.Fatalf("expected remove activation status 200, got %d body=%s", removeRes.Code, removeRes.Body.String())
+	}
+	afterRemove := decodeJSONResponse[licenseDetailResponse](t, removeRes)
+	if afterRemove.Status != "inactive" || afterRemove.ActiveSeats != 0 || len(afterRemove.Activations) != 0 {
+		t.Fatalf("expected inactive license with no seats, got %s", removeRes.Body.String())
+	}
+
+	validateAfterRemoveRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/validate", validateRequest{
+		LicenseKey:  generated.LicenseKey,
+		Fingerprint: fingerprint,
+	}, nil)
+	validatedAfterRemove := decodeJSONResponse[publicLicenseResponse](t, validateAfterRemoveRes)
+	if validatedAfterRemove.Valid || validatedAfterRemove.Reason == nil || *validatedAfterRemove.Reason != "fingerprint_not_active" {
+		t.Fatalf("expected fingerprint_not_active after removal, got %s", validateAfterRemoveRes.Body.String())
+	}
+
+	// A slug's product is returned to apps so they can reject keys meant for another product.
+	productSlug := "integration-product-" + strings.ToLower(flowSuffix)
+	createSlugRes := doJSONRequest(t, handler, http.MethodPost, "/management/slugs", map[string]any{
+		"name": productSlug, "max_activations": 1, "expiration_type": "forever", "product": "integration-app",
+	}, adminHeaders)
+	if createSlugRes.Code != http.StatusCreated {
+		t.Fatalf("expected create slug 201, got %d body=%s", createSlugRes.Code, createSlugRes.Body.String())
+	}
+	productLicenseRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/generate", generateRequest{Slug: productSlug}, adminHeaders)
+	productLicense := decodeJSONResponse[generateResponse](t, productLicenseRes)
+	productActivateRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/activate", activateRequest{
+		LicenseKey:  productLicense.LicenseKey,
+		Fingerprint: fingerprint,
+	}, nil)
+	productActivated := decodeJSONResponse[publicLicenseResponse](t, productActivateRes)
+	if productActivated.License == nil || productActivated.License.Product == nil || *productActivated.License.Product != "integration-app" {
+		t.Fatalf("expected license.product integration-app, got %s", productActivateRes.Body.String())
+	}
+
+	// Unknown keys get the same 200 shape with reason not_found.
+	unknownRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/validate", validateRequest{
+		LicenseKey:  "DOES-NOT-EXIST-" + flowSuffix,
+		Fingerprint: fingerprint,
+	}, nil)
+	if unknownRes.Code != http.StatusOK {
+		t.Fatalf("expected unknown key status 200, got %d", unknownRes.Code)
+	}
+	unknown := decodeJSONResponse[publicLicenseResponse](t, unknownRes)
+	if unknown.Valid || unknown.License != nil || unknown.Reason == nil || *unknown.Reason != "not_found" {
+		t.Fatalf("expected not_found response, got %s", unknownRes.Body.String())
 	}
 }
 

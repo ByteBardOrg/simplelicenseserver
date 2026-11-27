@@ -1,5 +1,6 @@
 import Link from "next/link";
 import CodeExample from "../../../../../components/CodeExample";
+import Screenshot from "../../../../../components/Screenshot";
 
 export const metadata = {
   title: "Slug Concepts",
@@ -69,7 +70,32 @@ export default function SlugConceptsPage() {
           <li>
             <code>attributes</code>: JSON object for license information such as plan, features, or entitlement flags.
           </li>
+          <li>
+            <code>product</code>: optional name of the app these licenses are for, such as <code>desktop-app</code>.
+            Give every plan of the same app the same product. Apps receive it as <code>license.product</code> and should
+            reject keys for another product; offline tokens carry it as <code>aud</code>. Changing it applies to
+            licenses already issued from the slug.
+          </li>
         </ul>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Slugs in the management UI</h3>
+        <p>The Slugs page lists every plan with its product, seat limit, expiry and offline setting. Click one to edit it.</p>
+        <Screenshot
+          src="/docs/screenshots/ui-slugs.webp"
+          alt="The Slugs page: a table of slugs with name, product, seats, expiry, offline token lifetime and attribute count."
+          width={1200}
+          height={540}
+        />
+        <Screenshot
+          narrow
+          src="/docs/screenshots/ui-slug-form.webp"
+          alt="Editing a slug named onprem-annual: product onprem-server, 2 seats, expires 365 days after issue, offline tokens on with an 8760 hour lifetime, and tier enterprise attributes."
+          width={448}
+          height={876}
+          caption="A year-long on-prem plan: 8760-hour offline tokens, capped by the 365-day license expiry."
+        />
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
@@ -97,12 +123,12 @@ export default function SlugConceptsPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>Snapshot behavior at issuance</h3>
         <p>
-          When your backend calls <code>POST /generate</code>, the server resolves slug policy and stores it on the
+          When your backend calls <code>POST /api/v1/generate</code>, the server resolves slug policy and stores it on the
           license. This includes policy fields like expiration and max activations, plus the slug <code>attributes</code>
           object. Later slug edits affect new licenses, not existing ones.
         </p>
         <p>
-          License <code>metadata</code> is different: it comes from the <code>POST /generate</code> request and is stored
+          License <code>metadata</code> is different: it comes from the <code>POST /api/v1/generate</code> request and is stored
           alongside the slug snapshot for that license instance.
         </p>
         <p>Example slug policy:</p>
@@ -118,7 +144,7 @@ export default function SlugConceptsPage() {
             Create and update slug templates with Management API routes under <code>/management/slugs</code>.
           </li>
           <li>
-            Generate licenses by sending that slug name to <code>POST /generate</code>.
+            Generate licenses by sending that slug name to <code>POST /api/v1/generate</code>.
           </li>
           <li>
             Keep stable slug names in integrations; rename intentionally and only when you can update callers.

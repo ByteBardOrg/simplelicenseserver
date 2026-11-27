@@ -140,6 +140,13 @@ export const docsIndex = [
     keywords: ["0.2.0", "0.1.0", "migration", "breaking changes"]
   },
   {
+    href: "/docs/migration/0-4-0-to-0-5-0/",
+    title: "0.4.0 -> 0.5.0",
+    summary: "Breaking: /api/v1 routes, one runtime response shape, slug products, and license edit/restore/device removal endpoints.",
+    icon: "bx-git-compare",
+    keywords: ["0.5.0", "0.4.0", "migration", "breaking changes", "api/v1", "validate", "not_found", "restore", "seats"]
+  },
+  {
     href: "/docs/migration/0-3-0-to-0-4-0/",
     title: "0.3.0 -> 0.4.0",
     summary: "Slug attributes snapshots, metadata behavior clarifications, and the new UI activation action.",
@@ -155,38 +162,59 @@ export const docsIndex = [
   },
   {
     href: "/docs/api/generate/",
-    title: "POST /generate",
+    title: "POST /api/v1/generate",
     summary: "Generate a license using a generated server API key.",
     icon: "bx-plus-circle",
     keywords: ["generate", "license api", "idempotency"]
   },
   {
     href: "/docs/api/revoke/",
-    title: "POST /revoke",
+    title: "POST /api/v1/revoke",
     summary: "Revoke an existing license key.",
     icon: "bx-block",
     keywords: ["revoke", "license api"]
   },
   {
     href: "/docs/api/activate/",
-    title: "POST /activate",
+    title: "POST /api/v1/activate",
     summary: "Activate a license for a fingerprint.",
     icon: "bx-plug",
     keywords: ["activate", "license api", "fingerprint"]
   },
   {
     href: "/docs/api/validate/",
-    title: "POST /validate",
+    title: "POST /api/v1/validate",
     summary: "Validate runtime license state.",
     icon: "bx-check-shield",
     keywords: ["validate", "license api", "status"]
   },
   {
     href: "/docs/api/deactivate/",
-    title: "POST /deactivate",
+    title: "POST /api/v1/deactivate",
     summary: "Release a seat by deactivating one fingerprint.",
     icon: "bx-log-out-circle",
     keywords: ["deactivate", "license api", "seats"]
+  },
+  {
+    href: "/docs/api/management-licenses-get/",
+    title: "GET /management/licenses/{key}",
+    summary: "One license with the devices holding its seats.",
+    icon: "bx-detail",
+    keywords: ["management api", "licenses", "devices", "activations"]
+  },
+  {
+    href: "/docs/api/management-licenses-update/",
+    title: "PATCH /management/licenses/{key}",
+    summary: "Change seats or expiry, or revoke and restore a license.",
+    icon: "bx-edit",
+    keywords: ["management api", "licenses", "renew", "extend", "restore", "seats", "expiry"]
+  },
+  {
+    href: "/docs/api/management-licenses-remove-activation/",
+    title: "DELETE /management/licenses/{key}/activations/{id}",
+    summary: "Free a device's seat on a customer's behalf.",
+    icon: "bx-unlink",
+    keywords: ["management api", "devices", "seats", "deactivate", "transfer"]
   },
   {
     href: "/docs/api/management-api-keys-list/",

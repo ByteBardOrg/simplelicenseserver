@@ -21,6 +21,9 @@ func clearOptionalTimeoutEnv(t *testing.T) {
 	t.Setenv("RATE_LIMIT_IP_TTL", "")
 	t.Setenv("RATE_LIMIT_MAX_IP_ENTRIES", "")
 	t.Setenv("TRUST_PROXY_HEADERS", "")
+	t.Setenv("CLIENT_IP_HEADER", "")
+	t.Setenv("AUTH_FAILURE_MAX_ATTEMPTS", "")
+	t.Setenv("AUTH_FAILURE_WINDOW", "")
 	t.Setenv("UI_ENABLED", "")
 	t.Setenv("OFFLINE_SIGNING_ENCRYPTION_KEY", "")
 	t.Setenv("OFFLINE_TOKEN_ISSUER", "")
@@ -73,7 +76,9 @@ func TestLoadParsesServerKeysAndTimeouts(t *testing.T) {
 	t.Setenv("RATE_LIMIT_PER_IP_BURST", "41")
 	t.Setenv("RATE_LIMIT_IP_TTL", "11m")
 	t.Setenv("RATE_LIMIT_MAX_IP_ENTRIES", "15000")
-	t.Setenv("TRUST_PROXY_HEADERS", "true")
+	t.Setenv("CLIENT_IP_HEADER", "CF-Connecting-IP")
+	t.Setenv("AUTH_FAILURE_MAX_ATTEMPTS", "5")
+	t.Setenv("AUTH_FAILURE_WINDOW", "30m")
 	t.Setenv("UI_ENABLED", "true")
 	t.Setenv("OFFLINE_SIGNING_ENCRYPTION_KEY", "")
 	t.Setenv("OFFLINE_TOKEN_ISSUER", "")
@@ -131,8 +136,11 @@ func TestLoadParsesServerKeysAndTimeouts(t *testing.T) {
 	if cfg.RateLimitMaxIPEntries != 15000 {
 		t.Fatalf("unexpected max ip entries: %d", cfg.RateLimitMaxIPEntries)
 	}
-	if !cfg.TrustProxyHeaders {
-		t.Fatalf("expected trust proxy headers enabled")
+	if cfg.ClientIPHeader != "CF-Connecting-IP" {
+		t.Fatalf("unexpected client ip header: %q", cfg.ClientIPHeader)
+	}
+	if cfg.AuthFailureMaxAttempts != 5 || cfg.AuthFailureWindow != 30*time.Minute {
+		t.Fatalf("unexpected auth failure settings: %d %s", cfg.AuthFailureMaxAttempts, cfg.AuthFailureWindow)
 	}
 	if !cfg.UIEnabled {
 		t.Fatalf("expected ui enabled")
@@ -167,5 +175,53 @@ func TestLoadRejectsShortAPIKey(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "at least 16 characters") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadDefaultsForProxyAndAbuseProtection(t *testing.T) {
+	clearOptionalTimeoutEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("MANAGEMENT_API_KEYS", "management_key_dev_123456")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.ClientIPHeader != "" {
+		t.Fatalf("expected the TCP peer address by default, got header %q", cfg.ClientIPHeader)
+	}
+	if cfg.RateLimitGlobalRPS != 0 {
+		t.Fatalf("expected the global limit to be off by default, got %v", cfg.RateLimitGlobalRPS)
+	}
+	if cfg.AuthFailureMaxAttempts != 10 || cfg.AuthFailureWindow != 15*time.Minute {
+		t.Fatalf("unexpected auth failure defaults: %d %s", cfg.AuthFailureMaxAttempts, cfg.AuthFailureWindow)
+	}
+}
+
+func TestLoadRejectsLegacyTrustProxyHeaders(t *testing.T) {
+	clearOptionalTimeoutEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("MANAGEMENT_API_KEYS", "management_key_dev_123456")
+	t.Setenv("TRUST_PROXY_HEADERS", "true")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "CLIENT_IP_HEADER") {
+		t.Fatalf("expected a pointer to CLIENT_IP_HEADER, got %v", err)
+	}
+
+	t.Setenv("TRUST_PROXY_HEADERS", "false")
+	if _, err := Load(); err != nil {
+		t.Fatalf("TRUST_PROXY_HEADERS=false should be ignored, got %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidClientIPHeader(t *testing.T) {
+	clearOptionalTimeoutEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("MANAGEMENT_API_KEYS", "management_key_dev_123456")
+	t.Setenv("CLIENT_IP_HEADER", "X-Forwarded-For: 1.2.3.4")
+
+	if _, err := Load(); err == nil {
+		t.Fatalf("expected an error for an invalid header name")
 	}
 }

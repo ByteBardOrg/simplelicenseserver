@@ -83,9 +83,12 @@ type ActivationResult struct {
 	LicenseID                   string
 	LicenseKey                  string
 	Slug                        string
+	Product                     string
 	Attributes                  map[string]any
 	Fingerprint                 string
 	ExpiresAt                   *time.Time
+	ActiveSeats                 int
+	MaxActivations              int
 	OfflineEnabled              bool
 	OfflineTokenLifetimeSeconds int
 	Reason                      string
@@ -96,8 +99,11 @@ type ValidationResult struct {
 	Status                      string
 	LicenseID                   string
 	Slug                        string
+	Product                     string
 	Attributes                  map[string]any
 	ExpiresAt                   *time.Time
+	ActiveSeats                 int
+	MaxActivations              int
 	OfflineEnabled              bool
 	OfflineTokenLifetimeSeconds int
 	Reason                      string
@@ -105,8 +111,11 @@ type ValidationResult struct {
 
 type DeactivationResult struct {
 	Valid          bool
+	Reason         string
 	Released       bool
 	Status         string
+	Product        string
+	Attributes     map[string]any
 	ActiveSeats    int
 	MaxActivations int
 	ExpiresAt      *time.Time
@@ -196,6 +205,7 @@ type LicenseRow struct {
 	OfflineTokenLifetimeSeconds int
 	MaxActivations              int
 	ActiveSeats                 int
+	Product                     string
 }
 
 type slugOptions struct {
@@ -543,12 +553,19 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 	decision := aggregate.Activate(now, activeSeats, activeActivationID > 0)
 
 	if !decision.Valid {
+		seats, err := countActiveSeats(ctx, tx, license.ID)
+		if err != nil {
+			return ActivationResult{}, err
+		}
 		return ActivationResult{
 			Valid:                       false,
+			ActiveSeats:                 seats,
+			MaxActivations:              license.MaxActivations,
 			Status:                      string(decision.Status),
 			LicenseID:                   license.ID,
 			LicenseKey:                  license.Key,
 			Slug:                        license.SlugName,
+			Product:                     license.Product,
 			Attributes:                  copyMetadata(license.Attributes),
 			Fingerprint:                 fingerprint,
 			ExpiresAt:                   license.ExpiresAt,
@@ -619,16 +636,24 @@ func (s *Store) ActivateLicense(ctx context.Context, licenseKey, fingerprint str
 		}
 	}
 
+	seatsAfter, err := countActiveSeats(ctx, tx, license.ID)
+	if err != nil {
+		return ActivationResult{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return ActivationResult{}, fmt.Errorf("commit activate tx: %w", err)
 	}
 
 	return ActivationResult{
 		Valid:                       true,
+		ActiveSeats:                 seatsAfter,
+		MaxActivations:              license.MaxActivations,
 		Status:                      string(aggregate.Status()),
 		LicenseID:                   license.ID,
 		LicenseKey:                  license.Key,
 		Slug:                        license.SlugName,
+		Product:                     license.Product,
 		Attributes:                  copyMetadata(license.Attributes),
 		Fingerprint:                 fingerprint,
 		ExpiresAt:                   license.ExpiresAt,
@@ -664,13 +689,21 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 		return ValidationResult{}, err
 	}
 
+	activeSeats, err := countActiveSeats(ctx, tx, license.ID)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+
 	decision := aggregate.Validate(now, activeActivationID > 0)
 	if !decision.Valid {
 		return ValidationResult{
 			Valid:                       decision.Valid,
+			ActiveSeats:                 activeSeats,
+			MaxActivations:              license.MaxActivations,
 			Status:                      string(decision.Status),
 			LicenseID:                   license.ID,
 			Slug:                        license.SlugName,
+			Product:                     license.Product,
 			Attributes:                  copyMetadata(license.Attributes),
 			ExpiresAt:                   license.ExpiresAt,
 			OfflineEnabled:              license.OfflineEnabled,
@@ -713,9 +746,12 @@ func (s *Store) ValidateLicense(ctx context.Context, licenseKey, fingerprint str
 
 	return ValidationResult{
 		Valid:                       decision.Valid,
+		ActiveSeats:                 activeSeats,
+		MaxActivations:              license.MaxActivations,
 		Status:                      string(aggregate.Status()),
 		LicenseID:                   license.ID,
 		Slug:                        license.SlugName,
+		Product:                     license.Product,
 		Attributes:                  copyMetadata(license.Attributes),
 		ExpiresAt:                   license.ExpiresAt,
 		OfflineEnabled:              license.OfflineEnabled,
@@ -784,10 +820,15 @@ func (s *Store) DeactivateLicense(ctx context.Context, licenseKey, fingerprint, 
 		return DeactivationResult{}, fmt.Errorf("commit deactivate tx: %w", err)
 	}
 
+	valid, standingReason := aggregate.Standing(now)
+
 	return DeactivationResult{
-		Valid:          true,
+		Valid:          valid,
+		Reason:         string(standingReason),
 		Released:       released,
 		Status:         string(aggregate.Status()),
+		Product:        license.Product,
+		Attributes:     copyMetadata(license.Attributes),
 		ActiveSeats:    activeSeats,
 		MaxActivations: license.MaxActivations,
 		ExpiresAt:      license.ExpiresAt,
@@ -1362,7 +1403,8 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 		       l.attributes,
 		       s.name,
 		       s.offline_enabled,
-		       s.offline_token_lifetime_seconds
+		       s.offline_token_lifetime_seconds,
+		       s.product
 		FROM licenses l
 		JOIN slugs s ON s.id = l.slug_id
 		WHERE l.key = $1
@@ -1391,6 +1433,7 @@ func loadLicenseByKey(ctx context.Context, tx pgx.Tx, key string, forUpdate bool
 		&row.SlugName,
 		&row.OfflineEnabled,
 		&row.OfflineTokenLifetimeSeconds,
+		&row.Product,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -12,7 +12,7 @@ export const metadata = {
 const managementAuthExample = `curl -sS http://localhost:8080/management/api-keys \\
   -H "Authorization: Bearer management_key_dev_123456"`;
 
-const serverAuthExample = `curl -sS http://localhost:8080/generate \\
+const serverAuthExample = `curl -sS http://localhost:8080/api/v1/generate \\
   -H "Authorization: Bearer <generated_server_api_key>" \\
   -H "Content-Type: application/json" \\
   -d '{"slug":"default","metadata":{"email":"user@example.com"}}'`;
@@ -39,7 +39,7 @@ export default function AuthenticationPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>2) Generated server API key</h3>
         <p>
-          Create these from the Management API, then use them for <code>/generate</code> and <code>/revoke</code>.
+          Create these from the Management API, then use them for <code>/api/v1/generate</code> and <code>/api/v1/revoke</code>.
         </p>
         <CodeExample language="bash" code={serverAuthExample} />
       </div>
@@ -47,7 +47,7 @@ export default function AuthenticationPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>Public runtime routes</h3>
         <p>
-          <code>/activate</code>, <code>/validate</code>, and <code>/deactivate</code> do not require API keys, but you
+          <code>/api/v1/activate</code>, <code>/api/v1/validate</code>, and <code>/api/v1/deactivate</code> do not require API keys, but you
           should still call them from your app backend when possible.
         </p>
       </div>

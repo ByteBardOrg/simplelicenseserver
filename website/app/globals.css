@@ -1507,3 +1507,40 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Management UI screenshots in docs pages. */
+.docs-screenshot {
+  margin: 1rem 0 0;
+}
+
+.docs-screenshot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-lowest);
+  box-shadow: 0 24px 48px -24px rgba(2, 6, 16, 0.8);
+}
+
+.docs-screenshot-narrow {
+  max-width: 24rem;
+}
+
+.docs-screenshot figcaption {
+  margin-top: 0.55rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.docs-screenshot-pair {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  align-items: start;
+}
+
+.docs-screenshot-pair .docs-screenshot-narrow {
+  max-width: none;
+}

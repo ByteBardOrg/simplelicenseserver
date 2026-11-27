@@ -78,3 +78,40 @@ export const prettyJSON = (value) => JSON.stringify(value || {}, null, 2)
 export const hasKeys = (value) => Boolean(value) && typeof value === 'object' && Object.keys(value).length > 0
 
 export const errorMessage = (err, fallback) => err?.response?.data?.error || err?.message || fallback
+
+// Expiry dates are picked as a calendar day and expire at the end of that day, local time.
+export const toDateInputValue = (value) => {
+  const date = toDate(value)
+  if (!date) return ''
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+}
+
+export const endOfLocalDay = (value) => {
+  const match = (value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+  const [, year, month, day] = match.map(Number)
+  const date = new Date(year, month - 1, day, 23, 59, 59)
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
+  return date
+}
+
+const reasonLabels = {
+  not_found: 'License not found',
+  revoked: 'License is revoked',
+  expired: 'License has expired',
+  activation_limit_reached: 'All seats are in use',
+  fingerprint_not_active: 'This device is not activated',
+}
+
+export const reasonLabel = (reason) => reasonLabels[reason] || reason || 'Not valid'
+
+// Reads the exp claim of a JWT for display only. Nothing here verifies the signature.
+export const jwtExpiry = (token) => {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    const claims = JSON.parse(atob(payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), '=')))
+    return claims.exp ? new Date(claims.exp * 1000) : null
+  } catch {
+    return null
+  }
+}

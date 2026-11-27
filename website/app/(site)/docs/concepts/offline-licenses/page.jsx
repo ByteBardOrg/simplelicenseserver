@@ -1,5 +1,6 @@
 import Link from "next/link";
 import CodeExample from "../../../../../components/CodeExample";
+import Screenshot from "../../../../../components/Screenshot";
 
 export const metadata = {
   title: "Offline License Concepts",
@@ -12,6 +13,7 @@ export const metadata = {
 
 const tokenExample = `{
   "iss": "simple-license-server",
+  "aud": "desktop-app",
   "sub": "5345c73e-e338-4f5d-8585-dc9eff7c84e5",
   "slug": "desktop-pro",
   "fingerprint": "abc123-machine-fingerprint",
@@ -31,7 +33,7 @@ export default function OfflineLicenseConceptsPage() {
       <p className="eyebrow">Concepts</p>
       <h1>Offline license model</h1>
       <p>
-        Offline licenses are short-lived JWTs returned by <code>/activate</code> and refreshed by valid <code>/validate</code>
+        Offline licenses are short-lived JWTs returned by <code>/api/v1/activate</code> and refreshed by valid <code>/api/v1/validate</code>
         calls. They let a client keep validating locally for a bounded period when it cannot reach the server.
       </p>
 
@@ -61,13 +63,20 @@ export default function OfflineLicenseConceptsPage() {
           <li><code>retired</code>: no longer signs tokens and is omitted from public key exports.</li>
           <li>Each key has a <code>kid</code> so clients can choose the right public key for a token.</li>
         </ul>
+        <Screenshot
+          src="/docs/screenshots/ui-settings-offline.webp"
+          alt="Settings, Offline signing: the active signing key with a Copy public keys button, a form to create a key, and a table of keys with active and verify only statuses."
+          width={1200}
+          height={680}
+          caption="Settings → Offline signing: copy the public keys to bundle with your app, and rotate keys with Make active."
+        />
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>Token refresh behavior</h3>
         <ul>
-          <li><code>POST /activate</code> returns <code>token</code> only after a valid activation for an offline-enabled slug.</li>
-          <li><code>POST /validate</code> returns a refreshed <code>token</code> only after a valid online validation for an offline-enabled slug.</li>
+          <li><code>POST /api/v1/activate</code> returns <code>token</code> only after a valid activation for an offline-enabled slug.</li>
+          <li><code>POST /api/v1/validate</code> returns a refreshed <code>token</code> only after a valid online validation for an offline-enabled slug.</li>
           <li>If no active signing key exists, online validation still succeeds but no token is returned.</li>
           <li><code>offline_token_lifetime_hours</code> defaults to <code>24</code>; license expiration caps the token expiration when sooner.</li>
         </ul>
@@ -75,8 +84,30 @@ export default function OfflineLicenseConceptsPage() {
 
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>JWT claims</h3>
-        <p>Clients should validate the signature, expiration, issuer, and local fingerprint before trusting a token.</p>
+        <p>
+          Every token from a server is signed by the same active key, whichever slug it came from. A valid signature
+          only proves the token came from your server, not that it was meant for this app or this machine. Before
+          trusting a token, check all of:
+        </p>
+        <ol>
+          <li><strong>Signature</strong> against your bundled public keys, picked by the header <code>kid</code>.</li>
+          <li><strong><code>exp</code></strong> (and <code>nbf</code>) against the current time.</li>
+          <li><strong><code>iss</code></strong> equals your <code>OFFLINE_TOKEN_ISSUER</code>.</li>
+          <li>
+            <strong><code>aud</code></strong> equals your app&apos;s product, as set on its slugs. Without this check a
+            token sold for one product unlocks another. Most JWT libraries do it for you when given the expected
+            audience.
+          </li>
+          <li>
+            <strong><code>fingerprint</code></strong> equals this machine&apos;s fingerprint. Without this check one token
+            can be copied onto any number of machines.
+          </li>
+        </ol>
         <ul>
+          <li>
+            <code>aud</code> is the slug&apos;s <code>product</code>. Slugs without a product use{" "}
+            <code>OFFLINE_TOKEN_AUDIENCE</code>, and the claim is omitted when both are empty.
+          </li>
           <li>Use the nested <code>attributes</code> object claim for feature gating or plan logic.</li>
           <li>The <code>attributes</code> claim is a snapshot from the license at token-issuance time.</li>
         </ul>

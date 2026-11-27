@@ -67,7 +67,7 @@ async function generateLicense(input: {
   customerId: string | null
   checkoutSessionId: string
 }) {
-  const response = await fetch(licenseServerUrl + "/generate", {
+  const response = await fetch(licenseServerUrl + "/api/v1/generate", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -148,7 +148,7 @@ const stripeCliExample = `stripe listen --forward-to localhost:3000/api/webhooks
 
 stripe trigger checkout.session.completed`;
 
-const generateCurlExample = `curl -sS https://licenses.example.com/generate \\
+const generateCurlExample = `curl -sS https://licenses.example.com/api/v1/generate \\
   -H "Authorization: Bearer a94f2c8b5e11d67e8a03c91fd78122e3f6acbb16de2202aa0f814cc2f71d10be" \\
   -H "Idempotency-Key: evt_123" \\
   -H "Content-Type: application/json" \\
@@ -169,7 +169,7 @@ export default function StripeGuidePage() {
       <h1>Stripe example: checkout -&gt; Vercel webhook -&gt; license generation</h1>
       <p>
         This guide shows one reliable production pattern: Stripe handles checkout, a Vercel serverless route verifies
-        webhook signatures, and your backend bridge calls <code>POST /generate</code> on Simple License Server.
+        webhook signatures, and your backend bridge calls <code>POST /api/v1/generate</code> on Simple License Server.
       </p>
 
       <div className="card" style={{ marginTop: "1rem" }}>
@@ -196,7 +196,7 @@ export default function StripeGuidePage() {
             does not pass validation.
           </li>
           <li>
-            For valid events, your webhook calls <code>POST /generate</code> with the server API key and
+            For valid events, your webhook calls <code>POST /api/v1/generate</code> with the server API key and
             <code> Idempotency-Key: event.id</code> so Stripe retries cannot create duplicate licenses.
           </li>
           <li>
@@ -222,7 +222,7 @@ export default function StripeGuidePage() {
         </p>
         <p>
           The critical detail is setting <code>metadata.slug</code>, because your webhook uses this to call
-          <code> POST /generate</code>.
+          <code> POST /api/v1/generate</code>.
         </p>
         <CodeExample language="typescript" code={checkoutSessionExample} />
       </div>
@@ -254,10 +254,10 @@ export default function StripeGuidePage() {
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
-        <h3>6) Verify your /generate contract</h3>
+        <h3>6) Verify your /api/v1/generate contract</h3>
         <p>
           Your intermediary should send this shape to Simple License Server (server key required on
-          <code> /generate</code>).
+          <code> /api/v1/generate</code>).
         </p>
         <CodeExample language="bash" code={generateCurlExample} />
       </div>

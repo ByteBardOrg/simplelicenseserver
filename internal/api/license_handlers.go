@@ -43,27 +43,9 @@ type activateRequest struct {
 	Metadata    map[string]any `json:"metadata"`
 }
 
-type activateResponse struct {
-	Valid       bool       `json:"valid"`
-	Status      string     `json:"status"`
-	LicenseKey  string     `json:"license_key"`
-	Fingerprint string     `json:"fingerprint"`
-	ExpiresAt   *time.Time `json:"expires_at"`
-	Token       string     `json:"token,omitempty"`
-	Reason      string     `json:"reason,omitempty"`
-}
-
 type validateRequest struct {
 	LicenseKey  string `json:"license_key"`
 	Fingerprint string `json:"fingerprint"`
-}
-
-type validateResponse struct {
-	Valid     bool       `json:"valid"`
-	Status    string     `json:"status"`
-	ExpiresAt *time.Time `json:"expires_at"`
-	Token     string     `json:"token,omitempty"`
-	Reason    string     `json:"reason,omitempty"`
 }
 
 type deactivateRequest struct {
@@ -72,13 +54,64 @@ type deactivateRequest struct {
 	Reason      string `json:"reason"`
 }
 
-type deactivateResponse struct {
-	Valid          bool       `json:"valid"`
-	Released       bool       `json:"released"`
-	Status         string     `json:"status"`
-	ActiveSeats    int        `json:"active_seats"`
-	MaxActivations int        `json:"max_activations"`
-	ExpiresAt      *time.Time `json:"expires_at"`
+// publicLicenseResponse is the single response shape of /api/v1/activate, /validate and /deactivate.
+// Anyone holding a license key can call these endpoints, so it only carries what an app needs to decide
+// whether to unlock itself: never license metadata, slug names, internal IDs, or other devices.
+type publicLicenseResponse struct {
+	Valid   bool           `json:"valid"`
+	Reason  *string        `json:"reason"`
+	License *publicLicense `json:"license"`
+	Token   string         `json:"token,omitempty"`
+}
+
+type publicLicense struct {
+	// Product lets an app confirm the key is for it (compare with a value hard-coded in the app).
+	Product    *string        `json:"product"`
+	Status     string         `json:"status"`
+	ExpiresAt  *time.Time     `json:"expires_at"`
+	Seats      publicSeats    `json:"seats"`
+	Attributes map[string]any `json:"attributes"`
+}
+
+type publicSeats struct {
+	Used int `json:"used"`
+	Max  int `json:"max"`
+}
+
+const reasonNotFound = "not_found"
+
+func newPublicLicenseResponse(valid bool, reason, product, status string, expiresAt *time.Time, usedSeats, maxSeats int, attributes map[string]any) publicLicenseResponse {
+	if attributes == nil {
+		attributes = map[string]any{}
+	}
+	resp := publicLicenseResponse{
+		Valid: valid,
+		License: &publicLicense{
+			Product:    optionalString(product),
+			Status:     displayStatus(status, expiresAt),
+			ExpiresAt:  expiresAt,
+			Seats:      publicSeats{Used: usedSeats, Max: maxSeats},
+			Attributes: attributes,
+		},
+	}
+	if !valid && reason != "" {
+		resp.Reason = &reason
+	}
+	return resp
+}
+
+// optionalString maps the empty string the database stores for "not set" to JSON null.
+func optionalString(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func notFoundLicenseResponse() publicLicenseResponse {
+	reason := reasonNotFound
+	return publicLicenseResponse{Valid: false, Reason: &reason}
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +317,7 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 	result, err := s.service.ActivateLicense(r.Context(), req.LicenseKey, req.Fingerprint, req.Metadata)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "license not found"})
+			writeJSON(w, http.StatusOK, notFoundLicenseResponse())
 			return
 		}
 		s.writeUnexpectedError(w, "failed to activate license", err)
@@ -303,22 +336,16 @@ func (s *Server) handleActivate(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if result.Valid && result.OfflineEnabled {
 		var err error
-		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, result.Fingerprint, result.Attributes, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
+		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, result.Product, result.Fingerprint, result.Attributes, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
 		if err != nil {
 			s.writeUnexpectedError(w, "failed to issue offline token", err)
 			return
 		}
 	}
 
-	writeJSON(w, http.StatusOK, activateResponse{
-		Valid:       result.Valid,
-		Status:      result.Status,
-		LicenseKey:  result.LicenseKey,
-		Fingerprint: result.Fingerprint,
-		ExpiresAt:   result.ExpiresAt,
-		Token:       token,
-		Reason:      result.Reason,
-	})
+	resp := newPublicLicenseResponse(result.Valid, result.Reason, result.Product, result.Status, result.ExpiresAt, result.ActiveSeats, result.MaxActivations, result.Attributes)
+	resp.Token = token
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
@@ -349,7 +376,7 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	result, err := s.service.ValidateLicense(r.Context(), req.LicenseKey, req.Fingerprint)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "license not found"})
+			writeJSON(w, http.StatusOK, notFoundLicenseResponse())
 			return
 		}
 		s.writeUnexpectedError(w, "failed to validate license", err)
@@ -372,20 +399,16 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	token := ""
 	if result.Valid && result.OfflineEnabled {
 		var err error
-		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, req.Fingerprint, result.Attributes, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
+		token, err = s.issueOfflineToken(r.Context(), result.LicenseID, result.Slug, result.Product, req.Fingerprint, result.Attributes, result.ExpiresAt, result.OfflineTokenLifetimeSeconds)
 		if err != nil {
 			s.writeUnexpectedError(w, "failed to refresh offline token", err)
 			return
 		}
 	}
 
-	writeJSON(w, http.StatusOK, validateResponse{
-		Valid:     result.Valid,
-		Status:    result.Status,
-		ExpiresAt: result.ExpiresAt,
-		Token:     token,
-		Reason:    result.Reason,
-	})
+	resp := newPublicLicenseResponse(result.Valid, result.Reason, result.Product, result.Status, result.ExpiresAt, result.ActiveSeats, result.MaxActivations, result.Attributes)
+	resp.Token = token
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleDeactivate(w http.ResponseWriter, r *http.Request) {
@@ -421,7 +444,7 @@ func (s *Server) handleDeactivate(w http.ResponseWriter, r *http.Request) {
 	result, err := s.service.DeactivateLicense(r.Context(), req.LicenseKey, req.Fingerprint, req.Reason)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "license not found"})
+			writeJSON(w, http.StatusOK, notFoundLicenseResponse())
 			return
 		}
 		s.writeUnexpectedError(w, "failed to deactivate license", err)
@@ -439,12 +462,5 @@ func (s *Server) handleDeactivate(w http.ResponseWriter, r *http.Request) {
 		"expires_at":      result.ExpiresAt,
 	})
 
-	writeJSON(w, http.StatusOK, deactivateResponse{
-		Valid:          result.Valid,
-		Released:       result.Released,
-		Status:         result.Status,
-		ActiveSeats:    result.ActiveSeats,
-		MaxActivations: result.MaxActivations,
-		ExpiresAt:      result.ExpiresAt,
-	})
+	writeJSON(w, http.StatusOK, newPublicLicenseResponse(result.Valid, result.Reason, result.Product, result.Status, result.ExpiresAt, result.ActiveSeats, result.MaxActivations, result.Attributes))
 }

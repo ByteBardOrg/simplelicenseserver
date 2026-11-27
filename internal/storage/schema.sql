@@ -44,6 +44,10 @@ ALTER TABLE slugs
 ALTER TABLE slugs
     ADD COLUMN IF NOT EXISTS offline_token_lifetime_seconds INTEGER NOT NULL DEFAULT 86400;
 
+-- Which app a slug's licenses are for. Returned to apps as license.product and used as the offline JWT aud.
+ALTER TABLE slugs
+    ADD COLUMN IF NOT EXISTS product TEXT NOT NULL DEFAULT '';
+
 DO $$
 BEGIN
     IF NOT EXISTS (

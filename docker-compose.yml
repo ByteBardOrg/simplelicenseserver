@@ -41,13 +41,15 @@ services:
       HTTP_WRITE_TIMEOUT: 30s
       HTTP_IDLE_TIMEOUT: 60s
       RATE_LIMIT_ENABLED: "true"
-      RATE_LIMIT_GLOBAL_RPS: "100"
-      RATE_LIMIT_GLOBAL_BURST: "200"
+      RATE_LIMIT_GLOBAL_RPS: "0"
       RATE_LIMIT_PER_IP_RPS: "20"
       RATE_LIMIT_PER_IP_BURST: "40"
       RATE_LIMIT_IP_TTL: 10m
       RATE_LIMIT_MAX_IP_ENTRIES: "10000"
-      TRUST_PROXY_HEADERS: "false"
+      # Behind a proxy, name the header it sets with the real client IP, e.g. CF-Connecting-IP.
+      CLIENT_IP_HEADER: ""
+      AUTH_FAILURE_MAX_ATTEMPTS: "10"
+      AUTH_FAILURE_WINDOW: 15m
       OFFLINE_SIGNING_ENCRYPTION_KEY: development_offline_signing_key_123456
       OFFLINE_TOKEN_ISSUER: simple-license-server
     depends_on:

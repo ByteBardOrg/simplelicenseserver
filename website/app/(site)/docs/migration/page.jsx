@@ -16,6 +16,12 @@ export default function MigrationPage() {
       <p>Use these guides when moving between published API versions.</p>
 
       <div className="docs-list" style={{ marginTop: "1rem" }}>
+        <Link className="docs-item" href="/docs/migration/0-4-0-to-0-5-0/">
+          <div className="eyebrow">Migration · Breaking</div>
+          <h3>0.4.0 -&gt; 0.5.0</h3>
+          <p>License routes move under /api/v1, one response shape for runtime checks, and license editing endpoints.</p>
+        </Link>
+
         <Link className="docs-item" href="/docs/migration/0-3-0-to-0-4-0/">
           <div className="eyebrow">Migration</div>
           <h3>0.3.0 -&gt; 0.4.0</h3>

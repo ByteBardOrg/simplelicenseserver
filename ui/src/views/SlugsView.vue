@@ -8,7 +8,7 @@ import ToggleSwitch from '@/components/ToggleSwitch.vue'
 import UiDrawer from '@/components/UiDrawer.vue'
 import { slugAPI } from '@/stores/api'
 import { toast, toastError } from '@/lib/ui'
-import { errorMessage, formatExpiration, formatLifetime, hasKeys, parseJSONObject, prettyJSON } from '@/lib/format'
+import { endOfLocalDay, errorMessage, formatExpiration, formatLifetime, hasKeys, parseJSONObject, prettyJSON, toDateInputValue } from '@/lib/format'
 
 const slugs = ref([])
 const loading = ref(false)
@@ -29,6 +29,7 @@ const emptyForm = () => ({
   offline_enabled: false,
   offline_token_lifetime_hours: 24,
   attributes: '',
+  product: '',
 })
 
 const form = reactive(emptyForm())
@@ -40,6 +41,7 @@ const expirationOptions = [
 ]
 
 const archivedCount = computed(() => slugs.value.filter((slug) => slug.deleted_at).length)
+const knownProducts = computed(() => [...new Set(slugs.value.map((slug) => slug.product).filter(Boolean))].sort())
 
 const load = async () => {
   loading.value = true
@@ -52,23 +54,6 @@ const load = async () => {
   } finally {
     loading.value = false
   }
-}
-
-// Dates are entered as a calendar day and expire at the end of that day, local time.
-const toDateInputValue = (value) => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
-}
-
-const endOfLocalDay = (value) => {
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (!match) return null
-  const [, year, month, day] = match.map(Number)
-  const date = new Date(year, month - 1, day, 23, 59, 59)
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
-  return date
 }
 
 const openCreate = () => {
@@ -89,6 +74,7 @@ const openEdit = (slug) => {
     offline_enabled: Boolean(slug.offline_enabled),
     offline_token_lifetime_hours: slug.offline_token_lifetime_hours || 24,
     attributes: hasKeys(slug.attributes) ? prettyJSON(slug.attributes) : '',
+    product: slug.product || '',
   })
   editing.value = slug
   formError.value = ''
@@ -103,6 +89,7 @@ const buildPayload = () => {
     offline_enabled: form.offline_enabled,
     offline_token_lifetime_hours: Number(form.offline_token_lifetime_hours),
     attributes: parseJSONObject(form.attributes, 'Attributes'),
+    product: form.product.trim(),
   }
 
   if (form.expiration_type === 'duration') {
@@ -184,6 +171,7 @@ onMounted(load)
           <thead>
             <tr>
               <th>Name</th>
+              <th>Product</th>
               <th>Seats</th>
               <th>Expiry</th>
               <th>Offline tokens</th>
@@ -204,6 +192,7 @@ onMounted(load)
                   <StatusBadge v-if="slug.deleted_at" status="archived" />
                 </div>
               </td>
+              <td class="whitespace-nowrap font-mono text-xs" :class="slug.product ? 'text-ink-soft' : 'text-ink-faint'">{{ slug.product || '—' }}</td>
               <td class="whitespace-nowrap tabular-nums text-ink-soft">{{ slug.max_activations }}</td>
               <td class="whitespace-nowrap text-ink-soft">{{ formatExpiration(slug) }}</td>
               <td class="whitespace-nowrap text-ink-soft">
@@ -237,6 +226,18 @@ onMounted(load)
             <input v-model="form.max_activations" min="1" type="number" required class="field tabular-nums" />
           </label>
         </div>
+
+        <label class="block">
+          <span class="field-label">Product <span class="text-ink-faint">· optional</span></span>
+          <input v-model="form.product" list="known-products" placeholder="desktop-app" class="field font-mono" />
+          <datalist id="known-products">
+            <option v-for="product in knownProducts" :key="product" :value="product" />
+          </datalist>
+          <span class="field-hint">
+            Which app these licenses are for. Give every plan of the same app the same product. Apps get it as
+            <code class="font-mono">license.product</code>, and offline tokens carry it as <code class="font-mono">aud</code>.
+          </span>
+        </label>
 
         <div>
           <span class="field-label">Expires</span>

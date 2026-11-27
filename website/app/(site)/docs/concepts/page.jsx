@@ -45,7 +45,7 @@ const glossaryRows = [
   {
     term: "License API",
     meaning:
-      "License lifecycle endpoints. /generate and /revoke require a generated server API key; runtime routes are called by your app."
+      "License lifecycle endpoints. /api/v1/generate and /api/v1/revoke require a generated server API key; runtime routes are called by your app."
   },
   {
     term: "Management API",
@@ -60,17 +60,17 @@ const glossaryRows = [
   {
     term: "Runtime API",
     meaning:
-      "Client-facing endpoints (/activate, /validate, /deactivate) used by your shipped app."
+      "Client-facing endpoints (/api/v1/activate, /api/v1/validate, /api/v1/deactivate) used by your shipped app."
   },
   {
     term: "Idempotency-Key",
     meaning:
-      "Header used on /generate to make webhook retries safe and avoid duplicate license issuance."
+      "Header used on /api/v1/generate to make webhook retries safe and avoid duplicate license issuance."
   },
   {
     term: "Revocation",
     meaning:
-      "License-level action that sets status to revoked and blocks future activate/validate calls."
+      "License-level action that sets status to revoked and blocks activate/validate calls. An operator can restore it later with PATCH /management/licenses/{key}."
   }
 ];
 
@@ -129,11 +129,15 @@ export default function ConceptsPage() {
         <h3>System flow in plain language</h3>
         <ol>
           <li>You define a slug (policy template) for a product or plan.</li>
-          <li>Your trusted backend calls <code>POST /generate</code> with that slug.</li>
+          <li>Your trusted backend calls <code>POST /api/v1/generate</code> with that slug.</li>
           <li>The server creates a license key with expiration and seat limits resolved at that moment.</li>
           <li>The client app activates the license with a fingerprint, consuming a seat.</li>
           <li>The client periodically validates the same license+fingerprint pair.</li>
-          <li>Seats can be released with <code>POST /deactivate</code>; full access can be blocked with <code>POST /revoke</code>.</li>
+          <li>Seats can be released with <code>POST /api/v1/deactivate</code>; full access can be blocked with <code>POST /api/v1/revoke</code>.</li>
+          <li>
+            Operators can change a license's seats or expiry, restore a revoked license, and free a device's seat from
+            the management API or UI.
+          </li>
         </ol>
       </div>
 
@@ -166,11 +170,11 @@ export default function ConceptsPage() {
         </p>
         <ul>
           <li>
-            <code>metadata</code> on <code>POST /generate</code>: caller-provided license context persisted on the
+            <code>metadata</code> on <code>POST /api/v1/generate</code>: caller-provided license context persisted on the
             license record (for example customer ids, order ids, support lookup fields).
           </li>
           <li>
-            <code>metadata</code> on <code>POST /activate</code>: fingerprint-level context stored on the activation
+            <code>metadata</code> on <code>POST /api/v1/activate</code>: fingerprint-level context stored on the activation
             seat record when a new seat is created. It is not currently returned in license responses, webhook payloads,
             or offline JWT claims.
           </li>
@@ -199,7 +203,7 @@ export default function ConceptsPage() {
         </p>
         <ul>
           <li>All slugs default to offline disabled.</li>
-          <li><code>/activate</code> and <code>/validate</code> include <code>token</code> only when the slug allows offline use.</li>
+          <li><code>/api/v1/activate</code> and <code>/api/v1/validate</code> include <code>token</code> only when the slug allows offline use.</li>
           <li>Clients verify tokens with exported public signing keys.</li>
         </ul>
         <p style={{ marginTop: "0.7rem" }}>
@@ -214,10 +218,10 @@ export default function ConceptsPage() {
           activation with no <code>deactivated_at</code> value.
         </p>
         <ul>
-          <li><code>/activate</code> with a new fingerprint creates a seat if the license still has capacity.</li>
-          <li>Calling <code>/activate</code> again for an already-active fingerprint does not consume another seat.</li>
-          <li><code>/deactivate</code> releases that fingerprint seat immediately.</li>
-          <li>Revocation is different: <code>/revoke</code> blocks the whole license, not one seat.</li>
+          <li><code>/api/v1/activate</code> with a new fingerprint creates a seat if the license still has capacity.</li>
+          <li>Calling <code>/api/v1/activate</code> again for an already-active fingerprint does not consume another seat.</li>
+          <li><code>/api/v1/deactivate</code> releases that fingerprint seat immediately.</li>
+          <li>Revocation is different: <code>/api/v1/revoke</code> blocks the whole license, not one seat.</li>
         </ul>
       </div>
 
@@ -225,15 +229,15 @@ export default function ConceptsPage() {
         <h3>License API vs Management API</h3>
         <ul>
           <li>
-            <strong>License API</strong>: <code>/generate</code>, <code>/revoke</code>, <code>/activate</code>,
-            <code>/validate</code>, <code>/deactivate</code>.
+            <strong>License API</strong>: <code>/api/v1/generate</code>, <code>/api/v1/revoke</code>, <code>/api/v1/activate</code>,
+            <code>/api/v1/validate</code>, <code>/api/v1/deactivate</code>.
           </li>
           <li>
             <strong>Management API</strong>: <code>/management/slugs</code>, <code>/management/api-keys</code>, and
             <code> /management/webhooks</code> routes for operator tooling and frontend-backed workflows.
           </li>
           <li>Never call key-protected routes directly from customer-facing browser code.</li>
-          <li>For payment webhooks, use provider event id as <code>Idempotency-Key</code> on <code>/generate</code>.</li>
+          <li>For payment webhooks, use provider event id as <code>Idempotency-Key</code> on <code>/api/v1/generate</code>.</li>
         </ul>
       </div>
 
@@ -267,7 +271,8 @@ export default function ConceptsPage() {
           </li>
           <li>
             Current event types: <code>license.generated</code>, <code>license.activated</code>, <code>license.deactivated</code>,
-            <code> license.validated</code>, <code>license.validation_failed</code>, <code>license.revoked</code>.
+            <code> license.validated</code>, <code>license.validation_failed</code>, <code>license.revoked</code>,
+            <code> license.updated</code>.
           </li>
         </ul>
         <p style={{ marginTop: "0.7rem" }}>

@@ -39,7 +39,7 @@ export default function DocsHomePage() {
       <h2 style={{ marginTop: "2rem" }}>Try the API now</h2>
       <CodeExample
         language="bash"
-        code={`curl -sS http://localhost:8080/generate \\
+        code={`curl -sS http://localhost:8080/api/v1/generate \\
   -H "Authorization: Bearer <generated_server_api_key>" \\
   -H "Content-Type: application/json" \\
   -d '{"slug":"default","metadata":{"email":"user@example.com"}}'`}

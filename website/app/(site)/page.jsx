@@ -2,7 +2,7 @@ import Link from "next/link";
 import DockerPullCard from "../../components/DockerPullCard";
 import { codeLanguageClass, highlightCode } from "../../components/codeHighlight";
 
-const homeApiExample = `curl -X POST http://localhost:8080/activate \\
+const homeApiExample = `curl -X POST http://localhost:8080/api/v1/activate \\
   -H "Content-Type: application/json" \\
   -d '{
     "license_key": "C1B6DE-39A6E3-DE1529-8559A0-4AF593",
@@ -69,7 +69,7 @@ export default function HomePage() {
           <article className="easy-code-card">
             <div className="easy-code-head">
               <span className="eyebrow">API Example</span>
-              <span className="easy-code-endpoint">POST /activate</span>
+              <span className="easy-code-endpoint">POST /api/v1/activate</span>
             </div>
             <pre className="easy-code-body">
               <code

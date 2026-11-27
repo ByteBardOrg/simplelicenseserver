@@ -4,7 +4,8 @@ const webhookSupportedEvents = [
   "license.deactivated",
   "license.validated",
   "license.validation_failed",
-  "license.revoked"
+  "license.revoked",
+  "license.updated"
 ];
 
 export const apiEndpointGroups = {
@@ -12,9 +13,9 @@ export const apiEndpointGroups = {
     key: "license",
     title: "License API",
     summary:
-      "License lifecycle routes for generation, revocation, activation, validation, and seat release.",
+      "Versioned /api/v1 routes: provisioning (generate, revoke) for your backend and runtime checks (activate, validate, deactivate) for your app.",
     description:
-      "Use these endpoints for license lifecycle operations. /generate and /revoke require a generated active server API key. Runtime endpoints use license_key plus fingerprint.",
+      "All license routes live under /api/v1. /api/v1/generate and /api/v1/revoke are called from your backend and require a server API key. /api/v1/activate, /api/v1/validate and /api/v1/deactivate are called from your app with license_key plus fingerprint and need no other credentials; they share one response shape.",
     endpoints: ["generate", "revoke", "activate", "validate", "deactivate"]
   },
   management: {
@@ -26,6 +27,9 @@ export const apiEndpointGroups = {
       "Use these endpoints from internal tooling or your frontend backend to inspect licenses, manage slug policy templates, provisioning API keys, webhook endpoint configuration/logs, and offline JWT signing keys. Management routes require the management bootstrap key configured via MANAGEMENT_API_KEYS or MANAGEMENT_API_KEY.",
     endpoints: [
       "management-licenses-list",
+      "management-licenses-get",
+      "management-licenses-update",
+      "management-licenses-remove-activation",
       "management-slugs-list",
       "management-slugs-create",
       "management-slugs-get",
@@ -258,9 +262,9 @@ export const apiEndpoints = {
   generate: {
     key: "generate",
     group: "license",
-    label: "POST /generate",
+    label: "POST /api/v1/generate",
     method: "POST",
-    path: "/generate",
+    path: "/api/v1/generate",
     title: "Generate License",
     summary: "Create a new license for a slug. Intended for trusted backend systems after payment success.",
     details: [
@@ -269,7 +273,7 @@ export const apiEndpoints = {
       "Resolves slug expiration policy at generation time and stores expires_at on the license.",
       "Snapshots slug attributes at generation time and returns them as license attributes."
     ],
-    curl: `curl -X POST http://localhost:8080/generate \\
+    curl: `curl -X POST http://localhost:8080/api/v1/generate \\
   -H "Authorization: Bearer <generated_server_api_key>" \\
   -H "Idempotency-Key: evt_123" \\
   -H "Content-Type: application/json" \\
@@ -309,7 +313,7 @@ export const apiEndpoints = {
       { name: "license_key", type: "string", description: "Generated license key." },
       { name: "slug", type: "string", description: "Slug used at generation time." },
       { name: "status", type: '"inactive" | "active" | "revoked"', description: "Current license status." },
-      { name: "metadata", type: "object", description: "Caller-provided JSON from POST /generate for per-license business context (for example customer/order ids)." },
+      { name: "metadata", type: "object", description: "Caller-provided JSON from POST /api/v1/generate for per-license business context (for example customer/order ids). Never returned by the public runtime endpoints." },
       { name: "attributes", type: "object", description: "Slug-defined entitlement JSON (for example sku/edition/features/channel) snapshotted onto the license at generation time." },
       {
         name: "expires_at",
@@ -329,17 +333,18 @@ export const apiEndpoints = {
   revoke: {
     key: "revoke",
     group: "license",
-    label: "POST /revoke",
+    label: "POST /api/v1/revoke",
     method: "POST",
-    path: "/revoke",
+    path: "/api/v1/revoke",
     title: "Revoke License",
-    summary: "Revoke a license key. Revoked licenses cannot be activated or validated.",
+    summary: "Revoke a license key. Revoked licenses cannot be activated or validated until restored.",
     details: [
       "Requires a generated active server API key.",
       "Revocation is license-level, not seat-level.",
-      "After revocation, runtime checks return invalid/revoked state."
+      "After revocation, runtime checks return valid=false with reason revoked.",
+      "An operator can restore a revoked license with PATCH /management/licenses/{key} and revoked=false."
     ],
-    curl: `curl -X POST http://localhost:8080/revoke \\
+    curl: `curl -X POST http://localhost:8080/api/v1/revoke \\
   -H "Authorization: Bearer <generated_server_api_key>" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -370,189 +375,246 @@ export const apiEndpoints = {
   activate: {
     key: "activate",
     group: "license",
-    label: "POST /activate",
+    label: "POST /api/v1/activate",
     method: "POST",
-    path: "/activate",
+    path: "/api/v1/activate",
     title: "Activate License",
-    summary: "Bind a license key to a fingerprint. Usually the first runtime call after key entry.",
+    summary: "Bind a license key to a device fingerprint. Usually the first call after the user enters their key.",
     details: [
-      "Checks revoked/expired state and activation limits.",
-      "Creates or confirms an activation for the fingerprint.",
-      "Returns token when activation is valid, the slug has offline_enabled=true, and an active signing key exists.",
-      "Issued offline tokens include an attributes claim from the license snapshot.",
-      "Returns a non-valid status with reason when activation is denied."
+      "Checks revoked/expired state and the seat limit, then creates or confirms an activation for the fingerprint.",
+      "Activating the same fingerprint again is safe and does not use another seat.",
+      "Send a stable fingerprint, ideally a hash of the machine id rather than the raw hardware id.",
+      "Optional metadata is stored on the activation. A string metadata.name is shown in the management UI device list.",
+      "Check license.product against your app's own product so keys sold for another product are rejected.",
+      "Returns HTTP 200 for every decided outcome, including unknown keys (valid=false, reason=not_found, license=null). 4xx is only used for malformed requests and rate limits.",
+      "Never returns license metadata, slug names, internal ids, or other devices: anyone holding the key can call this endpoint."
     ],
-    curl: `curl -X POST http://localhost:8080/activate \\
+    curl: `curl -X POST http://localhost:8080/api/v1/activate \\
   -H "Content-Type: application/json" \\
   -d '{
     "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
-    "fingerprint": "abc123-machine-fingerprint",
+    "fingerprint": "sha256:9f86d081884c7d65",
     "metadata": {
-      "email": "user@example.com",
+      "name": "Work laptop",
       "platform": "macos"
     }
   }'`,
     requestBody: `{
   "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
-  "fingerprint": "abc123-machine-fingerprint",
+  "fingerprint": "sha256:9f86d081884c7d65",
   "metadata": {
-    "email": "user@example.com",
+    "name": "Work laptop",
     "platform": "macos"
   }
 }`,
     responseBody: `{
   "valid": true,
-  "status": "active",
-  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
-  "fingerprint": "abc123-machine-fingerprint",
-  "expires_at": "2026-10-20T12:00:00Z",
-  "token": "jwt-if-slug-offline-enabled",
-  "reason": ""
+  "reason": null,
+  "license": {
+    "product": "desktop-app",
+    "status": "active",
+    "expires_at": "2027-10-20T12:00:00Z",
+    "seats": { "used": 1, "max": 3 },
+    "attributes": {
+      "plan": "pro",
+      "features": ["analytics", "exports"]
+    }
+  },
+  "token": "jwt-if-slug-offline-enabled"
 }`,
     responseFields: [
-      { name: "valid", type: "boolean", description: "Whether activation succeeded for this fingerprint." },
+      { name: "valid", type: "boolean", description: "The only field your app needs to branch on." },
       {
-        name: "status",
-        type: '"inactive" | "active" | "revoked"',
-        description: "License status returned by activation logic."
-      },
-      { name: "license_key", type: "string", description: "License key provided in the request." },
-      { name: "fingerprint", type: "string", description: "Fingerprint evaluated for activation." },
-      {
-        name: "expires_at",
+        name: "reason",
         type: "string | null",
-        description: "RFC3339 timestamp when the license expires, or null when it does not expire."
+        description: "Why valid is false: not_found, revoked, expired, activation_limit_reached, or fingerprint_not_active. null when valid."
       },
+      {
+        name: "license",
+        type: "object | null",
+        description: "The license as your app may see it. null only when reason is not_found."
+      },
+      {
+        name: "license.product",
+        type: "string | null",
+        description: "The slug's product. Compare it with a value hard-coded in your app to reject keys sold for a different product."
+      },
+      {
+        name: "license.status",
+        type: '"inactive" | "active" | "revoked" | "expired"',
+        description: "Display status. expired is derived from expires_at."
+      },
+      { name: "license.expires_at", type: "string | null", description: "RFC3339 expiry, or null when the license never expires." },
+      { name: "license.seats.used", type: "number", description: "Devices currently activated on this license." },
+      { name: "license.seats.max", type: "number", description: "Maximum number of devices." },
+      { name: "license.attributes", type: "object", description: "Slug attributes snapshotted onto the license, for unlocking features." },
       {
         name: "token",
         type: "string (optional)",
-        description: "Offline JWT issued only when activation is valid, the slug is offline-enabled, and an active signing key exists. Includes a nested attributes claim."
-      },
-      {
-        name: "reason",
-        type: "string (optional)",
-        description: "Present on denied activations (for example revoked, expired, activation_limit_reached)."
+        description: "Offline JWT, present only when valid is true, the slug has offline tokens enabled, and an active signing key exists. Includes an attributes claim."
       }
     ],
     errorCodes: [
-      { status: 400, reason: "Invalid JSON, missing required fields, or invalid metadata." },
-      { status: 404, reason: "License not found." },
+      { status: 400, reason: "Invalid JSON, missing required fields, or oversized fields." },
+      { status: 429, reason: "Rate limited." },
       { status: 500, reason: "Unexpected server or storage error." }
     ]
   },
   validate: {
     key: "validate",
     group: "license",
-    label: "POST /validate",
+    label: "POST /api/v1/validate",
     method: "POST",
-    path: "/validate",
+    path: "/api/v1/validate",
     title: "Validate License",
-    summary: "High-frequency runtime check to confirm license status for a fingerprint.",
+    summary: "Routine check that a license is still good on this device.",
     details: [
-      "Verifies license state and fingerprint binding.",
-      "Returns status and expires_at for runtime decisions.",
-      "Refreshes token when validation is valid, the slug has offline_enabled=true, and an active signing key exists.",
-      "Refreshed offline tokens include an attributes claim from the license snapshot.",
-      "Designed for repeated online validation heartbeats."
+      "Verifies the license state and that this fingerprint holds an active seat.",
+      "Returns reason fingerprint_not_active when the device was never activated or its seat was removed; activate again to recover.",
+      "Refreshes the offline token when the slug has offline tokens enabled.",
+      "Check license.product against your app's own product so keys sold for another product are rejected.",
+      "Returns HTTP 200 for every decided outcome, including unknown keys (valid=false, reason=not_found, license=null). 4xx is only used for malformed requests and rate limits.",
+      "Never returns license metadata, slug names, internal ids, or other devices: anyone holding the key can call this endpoint."
     ],
-    curl: `curl -X POST http://localhost:8080/validate \\
+    curl: `curl -X POST http://localhost:8080/api/v1/validate \\
   -H "Content-Type: application/json" \\
   -d '{
     "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
-    "fingerprint": "abc123-machine-fingerprint"
+    "fingerprint": "sha256:9f86d081884c7d65"
   }'`,
     requestBody: `{
   "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
-  "fingerprint": "abc123-machine-fingerprint"
+  "fingerprint": "sha256:9f86d081884c7d65"
 }`,
     responseBody: `{
-  "valid": true,
-  "status": "active",
-  "expires_at": "2026-10-20T12:00:00Z",
-  "token": "refreshed-jwt-if-slug-offline-enabled",
-  "reason": ""
+  "valid": false,
+  "reason": "expired",
+  "license": {
+    "product": "desktop-app",
+    "status": "expired",
+    "expires_at": "2026-10-20T12:00:00Z",
+    "seats": { "used": 1, "max": 3 },
+    "attributes": {
+      "plan": "pro",
+      "features": ["analytics", "exports"]
+    }
+  }
 }`,
     responseFields: [
-      { name: "valid", type: "boolean", description: "Whether the license is valid for this fingerprint." },
+      { name: "valid", type: "boolean", description: "The only field your app needs to branch on." },
       {
-        name: "status",
-        type: '"inactive" | "active" | "revoked"',
-        description: "License status returned by validation logic."
-      },
-      {
-        name: "expires_at",
+        name: "reason",
         type: "string | null",
-        description: "RFC3339 timestamp when the license expires, or null for non-expiring licenses."
+        description: "Why valid is false: not_found, revoked, expired, activation_limit_reached, or fingerprint_not_active. null when valid."
       },
+      {
+        name: "license",
+        type: "object | null",
+        description: "The license as your app may see it. null only when reason is not_found."
+      },
+      {
+        name: "license.product",
+        type: "string | null",
+        description: "The slug's product. Compare it with a value hard-coded in your app to reject keys sold for a different product."
+      },
+      {
+        name: "license.status",
+        type: '"inactive" | "active" | "revoked" | "expired"',
+        description: "Display status. expired is derived from expires_at."
+      },
+      { name: "license.expires_at", type: "string | null", description: "RFC3339 expiry, or null when the license never expires." },
+      { name: "license.seats.used", type: "number", description: "Devices currently activated on this license." },
+      { name: "license.seats.max", type: "number", description: "Maximum number of devices." },
+      { name: "license.attributes", type: "object", description: "Slug attributes snapshotted onto the license, for unlocking features." },
       {
         name: "token",
         type: "string (optional)",
-        description: "Refreshed offline JWT returned only when validation is valid, the slug is offline-enabled, and an active signing key exists. Includes a nested attributes claim."
-      },
-      {
-        name: "reason",
-        type: "string (optional)",
-        description: "Present on invalid responses (for example revoked, expired, fingerprint_not_active)."
+        description: "Offline JWT, present only when valid is true, the slug has offline tokens enabled, and an active signing key exists. Includes an attributes claim."
       }
     ],
     errorCodes: [
-      { status: 400, reason: "Invalid JSON or missing required fields." },
-      { status: 404, reason: "License not found." },
+      { status: 400, reason: "Invalid JSON, missing required fields, or oversized fields." },
+      { status: 429, reason: "Rate limited." },
       { status: 500, reason: "Unexpected server or storage error." }
     ]
   },
   deactivate: {
     key: "deactivate",
     group: "license",
-    label: "POST /deactivate",
+    label: "POST /api/v1/deactivate",
     method: "POST",
-    path: "/deactivate",
+    path: "/api/v1/deactivate",
     title: "Deactivate Seat",
-    summary: "Release one fingerprint binding so a seat can be reused on another device.",
+    summary: "Release this device's seat so the license can be used on another device.",
     details: [
-      "Useful for reinstalls, hardware replacement, and seat transfer flows.",
-      "Behavior is idempotent by state: repeated calls do not double-release seats.",
-      "Idempotency-Key header is not required for this endpoint."
+      "Useful for sign-out, reinstalls, and moving to new hardware.",
+      "Idempotent: repeated calls never release more than one seat, and license.seats.used shows the result.",
+      "valid reflects whether the license itself is still usable (not revoked or expired).",
+      "Operators can also free a seat without the device via DELETE /management/licenses/{key}/activations/{id}.",
+      "Returns HTTP 200 for every decided outcome, including unknown keys (valid=false, reason=not_found, license=null). 4xx is only used for malformed requests and rate limits.",
+      "Never returns license metadata, slug names, internal ids, or other devices: anyone holding the key can call this endpoint."
     ],
-    curl: `curl -X POST http://localhost:8080/deactivate \\
+    curl: `curl -X POST http://localhost:8080/api/v1/deactivate \\
   -H "Content-Type: application/json" \\
   -d '{
     "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
-    "fingerprint": "abc123-machine-fingerprint",
-    "reason": "user_device_replaced"
+    "fingerprint": "sha256:9f86d081884c7d65",
+    "reason": "user_signed_out"
   }'`,
     requestBody: `{
   "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
-  "fingerprint": "abc123-machine-fingerprint",
-  "reason": "user_device_replaced"
+  "fingerprint": "sha256:9f86d081884c7d65",
+  "reason": "user_signed_out"
 }`,
     responseBody: `{
   "valid": true,
-  "released": true,
-  "status": "inactive",
-  "active_seats": 0,
-  "max_activations": 3,
-  "expires_at": "2026-10-20T12:00:00Z"
+  "reason": null,
+  "license": {
+    "product": "desktop-app",
+    "status": "inactive",
+    "expires_at": "2027-10-20T12:00:00Z",
+    "seats": { "used": 0, "max": 3 },
+    "attributes": {
+      "plan": "pro",
+      "features": ["analytics", "exports"]
+    }
+  }
 }`,
     responseFields: [
-      { name: "valid", type: "boolean", description: "Whether the request completed successfully." },
-      { name: "released", type: "boolean", description: "True when a seat was released for this fingerprint." },
+      { name: "valid", type: "boolean", description: "The only field your app needs to branch on." },
       {
-        name: "status",
-        type: '"inactive" | "active" | "revoked"',
-        description: "License status after deactivation logic is applied."
-      },
-      { name: "active_seats", type: "number", description: "Current active seat count after this request." },
-      { name: "max_activations", type: "number", description: "Seat limit from slug policy." },
-      {
-        name: "expires_at",
+        name: "reason",
         type: "string | null",
-        description: "RFC3339 timestamp when the license expires, or null when it does not expire."
+        description: "Why valid is false: not_found, revoked, expired, activation_limit_reached, or fingerprint_not_active. null when valid."
+      },
+      {
+        name: "license",
+        type: "object | null",
+        description: "The license as your app may see it. null only when reason is not_found."
+      },
+      {
+        name: "license.product",
+        type: "string | null",
+        description: "The slug's product. Compare it with a value hard-coded in your app to reject keys sold for a different product."
+      },
+      {
+        name: "license.status",
+        type: '"inactive" | "active" | "revoked" | "expired"',
+        description: "Display status. expired is derived from expires_at."
+      },
+      { name: "license.expires_at", type: "string | null", description: "RFC3339 expiry, or null when the license never expires." },
+      { name: "license.seats.used", type: "number", description: "Devices currently activated on this license." },
+      { name: "license.seats.max", type: "number", description: "Maximum number of devices." },
+      { name: "license.attributes", type: "object", description: "Slug attributes snapshotted onto the license, for unlocking features." },
+      {
+        name: "token",
+        type: "string (optional)",
+        description: "Offline JWT, present only when valid is true, the slug has offline tokens enabled, and an active signing key exists. Includes an attributes claim."
       }
     ],
     errorCodes: [
-      { status: 400, reason: "Invalid JSON or missing required fields." },
-      { status: 404, reason: "License not found." },
+      { status: 400, reason: "Invalid JSON, missing required fields, or oversized fields." },
+      { status: 429, reason: "Rate limited." },
       { status: 500, reason: "Unexpected server or storage error." }
     ]
   },
@@ -594,6 +656,7 @@ export const apiEndpoints = {
       "max_activations": 3,
       "active_seats": 1,
       "offline_enabled": true,
+      "product": "desktop-app",
       "offline_token_lifetime_hours": 24,
       "expires_at": "2026-10-20T12:00:00Z",
       "created_at": "2026-04-20T12:00:00Z",
@@ -621,6 +684,7 @@ export const apiEndpoints = {
       { name: "licenses[].id", type: "string", description: "Stable internal license id." },
       { name: "licenses[].license_key", type: "string", description: "Issued license key." },
       { name: "licenses[].slug", type: "string", description: "Slug used when the license was generated." },
+      { name: "licenses[].product", type: "string | null", description: "The slug's current product." },
       { name: "licenses[].status", type: '"inactive" | "active" | "revoked" | "expired"', description: "Display status. Expired is derived from expires_at for non-revoked licenses." },
       { name: "licenses[].metadata", type: "object", description: "Caller-provided JSON originally sent to POST /generate for this license instance." },
       { name: "licenses[].attributes", type: "object", description: "Slug-defined entitlement JSON snapshotted onto the license at generation time." },
@@ -639,6 +703,158 @@ export const apiEndpoints = {
     errorCodes: [
       { status: 400, reason: "Invalid page, page_size, search length, or status filter." },
       { status: 401, reason: "Missing or invalid management API key." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-licenses-get": {
+    key: "management-licenses-get",
+    group: "management",
+    label: "GET /management/licenses/{key}",
+    method: "GET",
+    path: "/management/licenses/{key}",
+    title: "Get License",
+    summary: "One license with the devices currently holding its seats.",
+    details: [
+      "Requires management API key auth.",
+      "Only active activations are listed; removed or deactivated devices are not."
+    ],
+    curl: `curl -sS http://localhost:8080/management/licenses/XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX \\
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `{
+  "id": "2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01",
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
+  "slug": "pro-yearly",
+  "status": "active",
+  "metadata": { "email": "user@example.com" },
+  "attributes": { "plan": "pro" },
+  "max_activations": 3,
+  "active_seats": 1,
+  "offline_enabled": true,
+  "product": "desktop-app",
+  "offline_token_lifetime_hours": 24,
+  "expires_at": "2027-10-20T12:00:00Z",
+  "created_at": "2026-04-20T12:00:00Z",
+  "activated_at": "2026-04-21T09:30:00Z",
+  "last_validated_at": "2026-04-21T10:45:00Z",
+  "revoked_at": null,
+  "activations": [
+    {
+      "id": 42,
+      "fingerprint": "sha256:9f86d081884c7d65",
+      "metadata": { "name": "Work laptop" },
+      "activated_at": "2026-04-21T09:30:00Z",
+      "last_validated_at": "2026-04-21T10:45:00Z"
+    }
+  ]
+}`,
+    responseFields: [
+      { name: "(license fields)", type: "object", description: "Same license fields as GET /management/licenses, plus activations." },
+      { name: "activations", type: "array", description: "Devices currently holding a seat, oldest first." },
+      { name: "activations[].id", type: "number", description: "Activation id, used to remove the device." },
+      { name: "activations[].fingerprint", type: "string", description: "Fingerprint the app sent on activation." },
+      { name: "activations[].metadata", type: "object", description: "Metadata the app sent on activation." },
+      { name: "activations[].activated_at", type: "string", description: "RFC3339 activation timestamp." },
+      { name: "activations[].last_validated_at", type: "string | null", description: "Most recent validation from this device." }
+    ],
+    errorCodes: [
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 404, reason: "License not found." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-licenses-update": {
+    key: "management-licenses-update",
+    group: "management",
+    label: "PATCH /management/licenses/{key}",
+    method: "PATCH",
+    path: "/management/licenses/{key}",
+    title: "Update License",
+    summary: "Change a single license's seat limit or expiry, or revoke and restore it.",
+    details: [
+      "Requires management API key auth.",
+      "Send any of max_activations, expires_at and revoked. Fields you leave out are unchanged.",
+      "expires_at: null makes the license never expire. Use this to extend a license when a customer renews.",
+      "Lowering max_activations below the current seat count keeps existing devices working but blocks new activations.",
+      "revoked: false restores a revoked license; its existing devices keep their seats.",
+      "Emits license.revoked when the update revokes the license, otherwise license.updated."
+    ],
+    curl: `curl -sS -X PATCH http://localhost:8080/management/licenses/XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX \\
+  -H "Authorization: Bearer management_key_dev_123456" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "max_activations": 5,
+    "expires_at": "2028-10-20T23:59:59Z"
+  }'`,
+    requestBody: `{
+  "max_activations": 5,
+  "expires_at": "2028-10-20T23:59:59Z",
+  "revoked": false
+}`,
+    responseBody: `{
+  "id": "2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01",
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
+  "slug": "pro-yearly",
+  "status": "active",
+  "metadata": { "email": "user@example.com" },
+  "attributes": { "plan": "pro" },
+  "max_activations": 3,
+  "active_seats": 1,
+  "offline_enabled": true,
+  "product": "desktop-app",
+  "offline_token_lifetime_hours": 24,
+  "expires_at": "2027-10-20T12:00:00Z",
+  "created_at": "2026-04-20T12:00:00Z",
+  "activated_at": "2026-04-21T09:30:00Z",
+  "last_validated_at": "2026-04-21T10:45:00Z",
+  "revoked_at": null,
+  "activations": [
+    {
+      "id": 42,
+      "fingerprint": "sha256:9f86d081884c7d65",
+      "metadata": { "name": "Work laptop" },
+      "activated_at": "2026-04-21T09:30:00Z",
+      "last_validated_at": "2026-04-21T10:45:00Z"
+    }
+  ]
+}`,
+    responseFields: [
+      { name: "max_activations", type: "number (request, optional)", description: "New seat limit. Must be at least 1." },
+      { name: "expires_at", type: "string | null (request, optional)", description: "RFC3339 expiry, or null for never." },
+      { name: "revoked", type: "boolean (request, optional)", description: "true revokes, false restores." },
+      { name: "(response)", type: "object", description: "The updated license, same shape as GET /management/licenses/{key}." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "No fields sent, max_activations below 1, or expires_at not RFC3339/null." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 404, reason: "License not found." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-licenses-remove-activation": {
+    key: "management-licenses-remove-activation",
+    group: "management",
+    label: "DELETE /management/licenses/{key}/activations/{id}",
+    method: "DELETE",
+    path: "/management/licenses/{key}/activations/{id}",
+    title: "Remove Device",
+    summary: "Free a seat on a customer's behalf, for example when their old laptop is gone.",
+    details: [
+      "Requires management API key auth.",
+      "The removed device gets reason fingerprint_not_active on its next validate and can activate again if a seat is free.",
+      "Emits license.deactivated with reason removed_by_admin."
+    ],
+    curl: `curl -sS -X DELETE http://localhost:8080/management/licenses/XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX/activations/42 \\
+  -H "Authorization: Bearer management_key_dev_123456"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `(the updated license, same shape as GET /management/licenses/{key})`,
+    responseFields: [
+      { name: "(response)", type: "object", description: "The license after the seat was freed, including the remaining activations." }
+    ],
+    errorCodes: [
+      { status: 400, reason: "Invalid activation id." },
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 404, reason: "License or active activation not found." },
       { status: 500, reason: "Unexpected server or storage error." }
     ]
   },
@@ -669,6 +885,7 @@ export const apiEndpoints = {
       "expiration_days": null,
       "fixed_expires_at": null,
       "offline_enabled": false,
+      "product": "desktop-app",
       "offline_token_lifetime_hours": 24,
       "attributes": {
         "plan": "starter",
@@ -684,6 +901,7 @@ export const apiEndpoints = {
       { name: "slugs", type: "array", description: "Slug policy records available for generation." },
       { name: "slugs[].offline_enabled", type: "boolean", description: "Whether licenses under this slug can receive offline JWTs." },
       { name: "slugs[].offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." },
+      { name: "slugs[].product", type: "string | null", description: "Which app this slug's licenses are for. Returned to apps as license.product and written to offline tokens as aud. Empty clears it." },
       { name: "slugs[].attributes", type: "object", description: "JSON object copied to generated licenses and exported as the JWT attributes claim." }
     ],
     errorCodes: [
@@ -716,6 +934,7 @@ export const apiEndpoints = {
     "expiration_type": "duration",
     "expiration_days": 30,
     "offline_enabled": true,
+    "product": "desktop-app",
     "offline_token_lifetime_hours": 24,
     "attributes": {
       "plan": "pro",
@@ -728,6 +947,7 @@ export const apiEndpoints = {
   "expiration_type": "duration",
   "expiration_days": 30,
   "offline_enabled": true,
+  "product": "desktop-app",
   "offline_token_lifetime_hours": 24,
   "attributes": {
     "plan": "pro",
@@ -742,6 +962,7 @@ export const apiEndpoints = {
   "expiration_days": 30,
   "fixed_expires_at": null,
   "offline_enabled": true,
+  "product": "desktop-app",
   "offline_token_lifetime_hours": 24,
   "attributes": {
     "plan": "pro",
@@ -760,6 +981,7 @@ export const apiEndpoints = {
       { name: "fixed_expires_at", type: "string | null", description: "RFC3339 timestamp required when expiration_type is fixed_date." },
       { name: "offline_enabled", type: "boolean", description: "Whether licenses under this slug can receive offline JWTs." },
       { name: "offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." },
+      { name: "product", type: "string | null", description: "Which app this slug's licenses are for. Returned to apps as license.product and written to offline tokens as aud. Empty clears it." },
       { name: "attributes", type: "object", description: "JSON object snapshotted to generated licenses and embedded in offline JWT attributes claim." },
       { name: "is_default", type: "boolean", description: "True only for the default slug." },
       { name: "created_at", type: "string", description: "RFC3339 creation timestamp." },
@@ -796,6 +1018,7 @@ export const apiEndpoints = {
   "expiration_days": 30,
   "fixed_expires_at": null,
   "offline_enabled": true,
+  "product": "desktop-app",
   "offline_token_lifetime_hours": 24,
   "attributes": {
     "plan": "pro",
@@ -811,6 +1034,7 @@ export const apiEndpoints = {
       { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Expiration policy mode." },
       { name: "offline_enabled", type: "boolean", description: "Whether this slug issues offline JWTs on valid activation/validation." },
       { name: "offline_token_lifetime_hours", type: "number", description: "Maximum lifetime for issued/refreshed offline JWTs, in hours." },
+      { name: "product", type: "string | null", description: "Which app this slug's licenses are for. Returned to apps as license.product and written to offline tokens as aud. Empty clears it." },
       { name: "attributes", type: "object", description: "JSON object snapshotted to generated licenses and embedded in offline JWT attributes claim." }
     ],
     errorCodes: [
@@ -842,6 +1066,7 @@ export const apiEndpoints = {
     "expiration_type": "fixed_date",
     "fixed_expires_at": "2027-01-01T00:00:00Z",
     "offline_enabled": true,
+    "product": "desktop-app",
     "offline_token_lifetime_hours": 48,
     "attributes": {
       "plan": "enterprise",
@@ -853,6 +1078,7 @@ export const apiEndpoints = {
   "expiration_type": "fixed_date",
   "fixed_expires_at": "2027-01-01T00:00:00Z",
   "offline_enabled": true,
+  "product": "desktop-app",
   "offline_token_lifetime_hours": 48,
   "attributes": {
     "plan": "enterprise",
@@ -867,6 +1093,7 @@ export const apiEndpoints = {
   "expiration_days": null,
   "fixed_expires_at": "2027-01-01T00:00:00Z",
   "offline_enabled": true,
+  "product": "desktop-app",
   "offline_token_lifetime_hours": 48,
   "attributes": {
     "plan": "enterprise",
@@ -882,6 +1109,7 @@ export const apiEndpoints = {
       { name: "expiration_type", type: '"forever" | "duration" | "fixed_date"', description: "Updated expiration policy mode." },
       { name: "offline_enabled", type: "boolean", description: "Updated offline JWT policy for this slug." },
       { name: "offline_token_lifetime_hours", type: "number", description: "Updated offline JWT lifetime for this slug, in hours." },
+      { name: "product", type: "string | null", description: "Which app this slug's licenses are for. Returned to apps as license.product and written to offline tokens as aud. Empty clears it." },
       { name: "attributes", type: "object", description: "Updated slug attributes for future license snapshots and offline JWT attributes claims." }
     ],
     errorCodes: [
@@ -1261,6 +1489,9 @@ export const apiEndpointOrder = [
   "validate",
   "deactivate",
   "management-licenses-list",
+  "management-licenses-get",
+  "management-licenses-update",
+  "management-licenses-remove-activation",
   "management-slugs-list",
   "management-slugs-create",
   "management-slugs-get",

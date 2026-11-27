@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { CircleCheck, Clock3, KeyRound, Users, WifiOff } from 'lucide-vue-next'
+import { Box, CircleCheck, Clock3, KeyRound, Users, WifiOff } from 'lucide-vue-next'
 import UiDrawer from '@/components/UiDrawer.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import { licensesAPI, slugAPI } from '@/stores/api'
@@ -95,6 +95,9 @@ watch(
       </label>
 
       <div v-if="selectedSlug" class="flex flex-wrap gap-1.5">
+        <span v-if="selectedSlug.product" class="inline-flex items-center gap-1.5 rounded-md bg-surface-container px-2 py-1 font-mono text-xs text-ink-soft">
+          <Box class="h-3.5 w-3.5 text-ink-muted" :stroke-width="1.8" /> {{ selectedSlug.product }}
+        </span>
         <span class="inline-flex items-center gap-1.5 rounded-md bg-surface-container px-2 py-1 text-xs text-ink-soft">
           <Users class="h-3.5 w-3.5 text-ink-muted" :stroke-width="1.8" /> {{ formatSeats(selectedSlug.max_activations) }}
         </span>

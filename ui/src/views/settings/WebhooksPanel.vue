@@ -16,6 +16,7 @@ const supportedEvents = [
   'license.validated',
   'license.validation_failed',
   'license.revoked',
+  'license.updated',
 ]
 
 const webhooks = ref([])

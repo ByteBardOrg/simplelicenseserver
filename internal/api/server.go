@@ -42,8 +42,9 @@ const (
 	maxWebhookNameLength    = 128
 	maxWebhookURLLength     = 2048
 	maxSearchQueryLength    = 256
+	maxProductLength        = 128
 	maxListPageSize         = 100
-	generateEndpointKey     = "/generate"
+	generateEndpointKey     = "/generate" // idempotency namespace stored in the database; not the route path
 )
 
 const (
@@ -53,6 +54,7 @@ const (
 	webhookEventLicenseValidated        = "license.validated"
 	webhookEventLicenseValidationFailed = "license.validation_failed"
 	webhookEventLicenseRevoked          = "license.revoked"
+	webhookEventLicenseUpdated          = "license.updated"
 )
 
 var supportedWebhookEvents = []string{
@@ -62,6 +64,7 @@ var supportedWebhookEvents = []string{
 	webhookEventLicenseValidated,
 	webhookEventLicenseValidationFailed,
 	webhookEventLicenseRevoked,
+	webhookEventLicenseUpdated,
 }
 
 var supportedWebhookEventSet = func() map[string]struct{} {
@@ -86,6 +89,8 @@ type Server struct {
 	managementAPIKeyHashes [][]byte
 	requestTimeout         time.Duration
 	rateLimiter            *ipRateLimiter
+	authLimiter            *authFailureLimiter
+	clientIPHeader         string
 	uiEnabled              bool
 	uiDistDir              string
 	offlineSigningKey      string
@@ -104,26 +109,33 @@ type Options struct {
 	RateLimitPerIPBurst   int
 	RateLimitIPTTL        time.Duration
 	RateLimitMaxIPEntries int
-	TrustProxyHeaders     bool
-	OfflineSigningKey     string
-	OfflineTokenIssuer    string
-	OfflineTokenAudience  string
+	// ClientIPHeader names the header the client IP is read from, e.g. "CF-Connecting-IP".
+	// Empty means the TCP peer address. See clientIPFromRequest.
+	ClientIPHeader string
+	// AuthFailureMaxAttempts wrong keys per IP within AuthFailureWindow lock that IP out of
+	// key-protected routes until the window ends. 0 disables the lockout.
+	AuthFailureMaxAttempts int
+	AuthFailureWindow      time.Duration
+	OfflineSigningKey      string
+	OfflineTokenIssuer     string
+	OfflineTokenAudience   string
 }
 
 func DefaultOptions() Options {
 	return Options{
-		RequestTimeout:        15 * time.Second,
-		UIEnabled:             false,
-		UIDistDir:             "/app/ui",
-		RateLimitEnabled:      true,
-		RateLimitGlobalRPS:    100,
-		RateLimitGlobalBurst:  200,
-		RateLimitPerIPRPS:     20,
-		RateLimitPerIPBurst:   40,
-		RateLimitIPTTL:        10 * time.Minute,
-		RateLimitMaxIPEntries: 10000,
-		TrustProxyHeaders:     false,
-		OfflineTokenIssuer:    "simple-license-server",
+		RequestTimeout:         15 * time.Second,
+		UIEnabled:              false,
+		UIDistDir:              "/app/ui",
+		RateLimitEnabled:       true,
+		RateLimitGlobalRPS:     0,
+		RateLimitGlobalBurst:   0,
+		RateLimitPerIPRPS:      20,
+		RateLimitPerIPBurst:    40,
+		RateLimitIPTTL:         10 * time.Minute,
+		RateLimitMaxIPEntries:  10000,
+		AuthFailureMaxAttempts: 10,
+		AuthFailureWindow:      15 * time.Minute,
+		OfflineTokenIssuer:     "simple-license-server",
 	}
 }
 
@@ -157,6 +169,9 @@ type licenseService interface {
 	CreateSigningKey(ctx context.Context, params storage.CreateSigningKeyParams) (storage.SigningKeyRecord, error)
 	ActivateSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
 	RetireSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
+	GetLicense(ctx context.Context, licenseKey string) (storage.LicenseDetail, error)
+	UpdateLicense(ctx context.Context, licenseKey string, params storage.UpdateLicenseParams) (storage.UpdatedLicense, error)
+	RemoveActivation(ctx context.Context, licenseKey string, activationID int64) (storage.RemovedActivation, error)
 }
 
 func NewServer(service licenseService, logger *slog.Logger, managementAPIKeys map[string]struct{}, requestTimeout time.Duration) *Server {
@@ -168,14 +183,6 @@ func NewServer(service licenseService, logger *slog.Logger, managementAPIKeys ma
 func NewServerWithOptions(service licenseService, logger *slog.Logger, managementAPIKeys map[string]struct{}, opts Options) *Server {
 	if opts.RequestTimeout <= 0 {
 		opts.RequestTimeout = DefaultOptions().RequestTimeout
-	}
-
-	if opts.RateLimitGlobalRPS <= 0 {
-		opts.RateLimitGlobalRPS = DefaultOptions().RateLimitGlobalRPS
-	}
-
-	if opts.RateLimitGlobalBurst <= 0 {
-		opts.RateLimitGlobalBurst = DefaultOptions().RateLimitGlobalBurst
 	}
 
 	if opts.RateLimitPerIPRPS <= 0 {
@@ -211,15 +218,16 @@ func NewServerWithOptions(service licenseService, logger *slog.Logger, managemen
 		offlineSigningKey:      strings.TrimSpace(opts.OfflineSigningKey),
 		offlineTokenIssuer:     strings.TrimSpace(opts.OfflineTokenIssuer),
 		offlineTokenAudience:   strings.TrimSpace(opts.OfflineTokenAudience),
+		clientIPHeader:         strings.TrimSpace(opts.ClientIPHeader),
+		authLimiter:            newAuthFailureLimiter(opts.AuthFailureMaxAttempts, opts.AuthFailureWindow, opts.RateLimitMaxIPEntries),
 		rateLimiter: newIPRateLimiter(rateLimiterConfig{
-			enabled:           opts.RateLimitEnabled,
-			globalRPS:         opts.RateLimitGlobalRPS,
-			globalBurst:       opts.RateLimitGlobalBurst,
-			perIPRPS:          opts.RateLimitPerIPRPS,
-			perIPBurst:        opts.RateLimitPerIPBurst,
-			ipTTL:             opts.RateLimitIPTTL,
-			maxIPEntries:      opts.RateLimitMaxIPEntries,
-			trustProxyHeaders: opts.TrustProxyHeaders,
+			enabled:      opts.RateLimitEnabled,
+			globalRPS:    opts.RateLimitGlobalRPS,
+			globalBurst:  opts.RateLimitGlobalBurst,
+			perIPRPS:     opts.RateLimitPerIPRPS,
+			perIPBurst:   opts.RateLimitPerIPBurst,
+			ipTTL:        opts.RateLimitIPTTL,
+			maxIPEntries: opts.RateLimitMaxIPEntries,
 		}),
 	}
 }
@@ -228,11 +236,13 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
-	mux.Handle("POST /generate", s.requireProvisioningKey(http.HandlerFunc(s.handleGenerate)))
-	mux.Handle("POST /revoke", s.requireProvisioningKey(http.HandlerFunc(s.handleRevoke)))
-	mux.HandleFunc("POST /activate", s.handleActivate)
-	mux.HandleFunc("POST /validate", s.handleValidate)
-	mux.HandleFunc("POST /deactivate", s.handleDeactivate)
+	// Provisioning: called from the operator's backend with a server API key.
+	mux.Handle("POST /api/v1/generate", s.requireProvisioningKey(http.HandlerFunc(s.handleGenerate)))
+	mux.Handle("POST /api/v1/revoke", s.requireProvisioningKey(http.HandlerFunc(s.handleRevoke)))
+	// Public: called from customer apps. The license key is the credential.
+	mux.HandleFunc("POST /api/v1/activate", s.handleActivate)
+	mux.HandleFunc("POST /api/v1/validate", s.handleValidate)
+	mux.HandleFunc("POST /api/v1/deactivate", s.handleDeactivate)
 	mux.Handle("GET /management/slugs", s.requireManagementKey(http.HandlerFunc(s.handleListSlugs)))
 	mux.Handle("POST /management/slugs", s.requireManagementKey(http.HandlerFunc(s.handleCreateSlug)))
 	mux.Handle("GET /management/slugs/{name}", s.requireManagementKey(http.HandlerFunc(s.handleGetSlug)))
@@ -242,6 +252,9 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /management/api-keys", s.requireManagementKey(http.HandlerFunc(s.handleCreateAPIKey)))
 	mux.Handle("POST /management/api-keys/{id}/revoke", s.requireManagementKey(http.HandlerFunc(s.handleRevokeAPIKey)))
 	mux.Handle("GET /management/licenses", s.requireManagementKey(http.HandlerFunc(s.handleListLicenses)))
+	mux.Handle("GET /management/licenses/{key}", s.requireManagementKey(http.HandlerFunc(s.handleGetLicense)))
+	mux.Handle("PATCH /management/licenses/{key}", s.requireManagementKey(http.HandlerFunc(s.handleUpdateLicense)))
+	mux.Handle("DELETE /management/licenses/{key}/activations/{id}", s.requireManagementKey(http.HandlerFunc(s.handleRemoveActivation)))
 	mux.Handle("GET /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleListWebhooks)))
 	mux.Handle("GET /management/webhooks/deliveries", s.requireManagementKey(http.HandlerFunc(s.handleListWebhookDeliveries)))
 	mux.Handle("POST /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleCreateWebhook)))
@@ -277,6 +290,9 @@ func (s *Server) requireProvisioningKey(next http.Handler) http.Handler {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "missing API key"})
 			return
 		}
+		if s.rejectLockedOut(w, r) {
+			return
+		}
 
 		if s.isAuthorizedManagementKey(apiKey) {
 			next.ServeHTTP(w, r)
@@ -290,6 +306,7 @@ func (s *Server) requireProvisioningKey(next http.Handler) http.Handler {
 		}
 
 		if !authorized {
+			s.authLimiter.recordFailure(s.clientIP(r), time.Now())
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "invalid API key"})
 			return
 		}
@@ -306,13 +323,34 @@ func (s *Server) requireManagementKey(next http.Handler) http.Handler {
 			return
 		}
 
+		if s.rejectLockedOut(w, r) {
+			return
+		}
+
 		if !s.isAuthorizedManagementKey(apiKey) {
+			s.authLimiter.recordFailure(s.clientIP(r), time.Now())
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "invalid API key"})
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// rejectLockedOut answers 429 when the client has sent too many wrong keys recently. A locked-out
+// client is refused even with a correct key, so guessing can't continue during the lockout.
+func (s *Server) rejectLockedOut(w http.ResponseWriter, r *http.Request) bool {
+	wait := s.authLimiter.blockedFor(s.clientIP(r), time.Now())
+	if wait <= 0 {
+		return false
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+	writeJSON(w, http.StatusTooManyRequests, errorResponse{Error: "too many failed authentication attempts; try again later"})
+	return true
+}
+
+func (s *Server) clientIP(r *http.Request) string {
+	return clientIPFromRequest(r, s.clientIPHeader)
 }
 
 func (s *Server) isAuthorizedManagementKey(candidate string) bool {
@@ -337,6 +375,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		s.logger.Info("http_request",
 			"method", r.Method,
 			"path", r.URL.Path,
+			"client_ip", s.clientIP(r),
 			"status", ww.status,
 			"duration_ms", time.Since(start).Milliseconds(),
 		)
@@ -365,7 +404,8 @@ func (s *Server) requestTimeoutMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.rateLimiter.allow(r) {
+		class, limited := rateLimitClass(r.URL.Path)
+		if limited && !s.rateLimiter.allow(class+"|"+s.clientIP(r)) {
 			w.Header().Set("Retry-After", "1")
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{Error: "rate limit exceeded"})
 			return

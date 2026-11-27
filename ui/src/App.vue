@@ -19,15 +19,19 @@ const authChecked = ref(false)
 
 const isAuthenticated = computed(() => authChecked.value && Boolean(authStore.apiKey))
 
+// Returns '' when the key works, otherwise a message for the sign-in form.
 const verifyManagementKey = async (key) => {
   localStorage.setItem('management_api_key', key)
   try {
     await licensesAPI.list({ page: 1, page_size: 1 })
     authStore.setApiKey(key)
-    return true
-  } catch {
+    return ''
+  } catch (err) {
     authStore.clearApiKey()
-    return false
+    if (err?.response?.status === 429) {
+      return 'Too many failed attempts. Wait a few minutes and try again.'
+    }
+    return 'That key was not accepted.'
   }
 }
 
@@ -41,8 +45,9 @@ const login = async () => {
 
   loginLoading.value = true
   try {
-    if (!(await verifyManagementKey(key))) {
-      loginError.value = 'That key was not accepted.'
+    const problem = await verifyManagementKey(key)
+    if (problem) {
+      loginError.value = problem
       return
     }
     managementKey.value = ''

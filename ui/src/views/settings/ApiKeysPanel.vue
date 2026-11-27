@@ -59,8 +59,8 @@ onMounted(load)
   <section>
     <h2 class="text-lg font-semibold tracking-tight text-ink-strong">Server API keys</h2>
     <p class="mt-1 text-sm leading-6 text-ink-muted">
-      Your backend uses these to call <code class="font-mono text-xs text-ink-soft">/generate</code> and
-      <code class="font-mono text-xs text-ink-soft">/revoke</code>, for example from a payment webhook.
+      Your backend uses these to call <code class="font-mono text-xs text-ink-soft">/api/v1/generate</code> and
+      <code class="font-mono text-xs text-ink-soft">/api/v1/revoke</code>, for example from a payment webhook.
     </p>
 
     <form class="mt-5 flex gap-2" @submit.prevent="create">

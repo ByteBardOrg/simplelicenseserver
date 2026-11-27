@@ -11,7 +11,7 @@ import (
 	"simple-license-server/internal/storage"
 )
 
-func (s *Server) issueOfflineToken(ctx context.Context, licenseID, slugName, fingerprint string, attributes map[string]any, licenseExpiresAt *time.Time, lifetimeSeconds int) (string, error) {
+func (s *Server) issueOfflineToken(ctx context.Context, licenseID, slugName, product, fingerprint string, attributes map[string]any, licenseExpiresAt *time.Time, lifetimeSeconds int) (string, error) {
 	licenseID = strings.TrimSpace(licenseID)
 	slugName = strings.TrimSpace(slugName)
 	fingerprint = strings.TrimSpace(fingerprint)
@@ -45,9 +45,15 @@ func (s *Server) issueOfflineToken(ctx context.Context, licenseID, slugName, fin
 		return "", nil
 	}
 
+	// aud is the slug's product, so an app that checks aud only accepts its own product's tokens.
+	audience := strings.TrimSpace(product)
+	if audience == "" {
+		audience = s.offlineTokenAudience
+	}
+
 	return offlinejwt.SignEd25519JWT(activeKey.PrivateKeyEncrypted, s.offlineSigningKey, activeKey.Kid, offlinejwt.TokenParams{
 		Issuer:      s.offlineTokenIssuer,
-		Audience:    s.offlineTokenAudience,
+		Audience:    audience,
 		Subject:     licenseID,
 		Slug:        slugName,
 		Fingerprint: fingerprint,

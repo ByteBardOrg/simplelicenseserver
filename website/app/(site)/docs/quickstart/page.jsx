@@ -55,17 +55,16 @@ const composeExample = `services:
       HTTP_WRITE_TIMEOUT: 30s
       HTTP_IDLE_TIMEOUT: 60s
 
-      # OPTIONAL: global and per-IP rate limiting.
+      # OPTIONAL: per-IP rate limiting.
       RATE_LIMIT_ENABLED: "true"
-      RATE_LIMIT_GLOBAL_RPS: "100"
-      RATE_LIMIT_GLOBAL_BURST: "200"
       RATE_LIMIT_PER_IP_RPS: "20"
       RATE_LIMIT_PER_IP_BURST: "40"
       RATE_LIMIT_IP_TTL: 10m
       RATE_LIMIT_MAX_IP_ENTRIES: "10000"
 
-      # OPTIONAL: set true only when a trusted proxy sets forwarding headers.
-      TRUST_PROXY_HEADERS: "false"
+      # OPTIONAL: behind a proxy, the header carrying the real client IP
+      # (for example CF-Connecting-IP behind Cloudflare). Leave empty otherwise.
+      CLIENT_IP_HEADER: ""
 
 volumes:
   postgres_data:`;
@@ -79,7 +78,7 @@ const createServerKeyCommand = `curl -sS http://localhost:8080/management/api-ke
   -H "Content-Type: application/json" \\
   -d '{"name":"quickstart"}'`;
 
-const generateKeyCommand = `curl -sS http://localhost:8080/generate \\
+const generateKeyCommand = `curl -sS http://localhost:8080/api/v1/generate \\
   -H "Authorization: Bearer <generated_server_api_key>" \\
   -H "Content-Type: application/json" \\
   -H "Idempotency-Key: evt_quickstart_001" \\

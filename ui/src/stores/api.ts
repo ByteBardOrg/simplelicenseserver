@@ -66,8 +66,12 @@ export const apiKeysAPI = {
 
 export const licensesAPI = {
   list: (params: { page?: number; page_size?: number; q?: string; status?: string } = {}) => managementApi.get('/licenses', { params }),
-  generate: (data: { slug: string; metadata?: Record<string, any> }) => rootApi.post('/generate', data, { headers: managementAuthHeaders() }),
-  revoke: (data: { license_key: string }) => rootApi.post('/revoke', data, { headers: managementAuthHeaders() }),
+  get: (key: string) => managementApi.get(`/licenses/${encodeURIComponent(key)}`),
+  update: (key: string, data: Partial<{ max_activations: number; expires_at: string | null; revoked: boolean }>) =>
+    managementApi.patch(`/licenses/${encodeURIComponent(key)}`, data),
+  removeActivation: (key: string, activationId: number) =>
+    managementApi.delete(`/licenses/${encodeURIComponent(key)}/activations/${activationId}`),
+  generate: (data: { slug: string; metadata?: Record<string, any> }) => rootApi.post('/api/v1/generate', data, { headers: managementAuthHeaders() }),
 }
 
 export const webhooksAPI = {
@@ -87,4 +91,11 @@ export const offlineAPI = {
   createSigningKey: (name: string) => managementApi.post('/offline/signing-keys', { name }),
   activateSigningKey: (id: number) => managementApi.post(`/offline/signing-keys/${id}/activate`),
   retireSigningKey: (id: number) => managementApi.post(`/offline/signing-keys/${id}/retire`),
+}
+
+// Public runtime endpoints. They take no credentials; the license key is the secret.
+// The admin UI uses them to bind a device by hand, e.g. to hand out an offline JWT for an on-prem install.
+export const runtimeAPI = {
+  activate: (data: { license_key: string; fingerprint: string; metadata?: Record<string, any> }) => rootApi.post('/api/v1/activate', data),
+  validate: (data: { license_key: string; fingerprint: string }) => rootApi.post('/api/v1/validate', data),
 }
