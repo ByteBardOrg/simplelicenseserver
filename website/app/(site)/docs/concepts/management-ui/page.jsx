@@ -48,12 +48,17 @@ export default function ManagementUIConceptsPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h3>What the UI manages</h3>
         <ul>
-          <li>List, inspect, generate, activate, and revoke licenses.</li>
-          <li>Create and edit slug policy templates.</li>
-          <li>Create and revoke generated server API keys.</li>
-          <li>Configure webhook endpoints and inspect recent delivery runs.</li>
-          <li>Create, activate, retire, and export offline license signing keys.</li>
+          <li><strong>Licenses</strong>: search, filter by status, inspect, issue, and revoke licenses.</li>
+          <li><strong>Slugs</strong>: create, edit, and archive slug policy templates.</li>
+          <li>
+            <strong>Settings</strong>: create and revoke generated server API keys, configure webhook endpoints and
+            inspect recent deliveries, and create, activate, retire, and export offline signing keys.
+          </li>
         </ul>
+        <p>
+          Device activation is a client-side operation, so the UI does not activate seats. Use{" "}
+          <code>POST /activate</code> from your application instead.
+        </p>
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>

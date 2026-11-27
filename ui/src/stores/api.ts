@@ -88,28 +88,3 @@ export const offlineAPI = {
   activateSigningKey: (id: number) => managementApi.post(`/offline/signing-keys/${id}/activate`),
   retireSigningKey: (id: number) => managementApi.post(`/offline/signing-keys/${id}/retire`),
 }
-
-export const runtimeAPI = {
-  activate: (data: { license_key: string; fingerprint: string; metadata?: Record<string, any> }) => rootApi.post('/activate', data),
-  validate: (data: { license_key: string; fingerprint: string }) => rootApi.post('/validate', data),
-  deactivate: (data: { license_key: string; fingerprint: string; reason?: string }) => rootApi.post('/deactivate', data),
-}
-
-export const provisioningAPI = {
-  generate: (data: { slug: string; metadata?: Record<string, any> }, serverAPIKey: string, idempotencyKey?: string) => {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${serverAPIKey}`,
-    }
-    if (idempotencyKey) {
-      headers['Idempotency-Key'] = idempotencyKey
-    }
-    return rootApi.post('/generate', data, { headers })
-  },
-  revoke: (data: { license_key: string }, serverAPIKey: string) => {
-    return rootApi.post('/revoke', data, {
-      headers: {
-        Authorization: `Bearer ${serverAPIKey}`,
-      },
-    })
-  },
-}
