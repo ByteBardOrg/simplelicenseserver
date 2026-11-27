@@ -1,8 +1,9 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { Plus, RefreshCw } from 'lucide-vue-next'
+import { LockOpen, Plus, RefreshCw, TriangleAlert, X } from 'lucide-vue-next'
 import StatusBadge from '@/components/StatusBadge.vue'
 import ConfirmButton from '@/components/ConfirmButton.vue'
+import CopyButton from '@/components/CopyButton.vue'
 import ToggleSwitch from '@/components/ToggleSwitch.vue'
 import UiDrawer from '@/components/UiDrawer.vue'
 import { webhooksAPI } from '@/stores/api'
@@ -30,6 +31,10 @@ const editing = ref(null)
 const saving = ref(false)
 const formError = ref('')
 const form = reactive({ name: '', url: '', enabled: true, events: [] })
+// The signing secret is only ever returned on create or rotate, so show it once with a copy button.
+const shownSecret = ref(null) // { name, secret }
+
+const isPlainHTTP = (url) => /^http:\/\//i.test((url || '').trim())
 
 const eventLabel = (event) => event.replace('license.', '').replace(/_/g, ' ')
 
@@ -87,8 +92,12 @@ const save = async () => {
   saving.value = true
   try {
     const payload = { name: form.name.trim(), url: form.url.trim(), events: form.events, enabled: form.enabled }
-    if (editing.value) await webhooksAPI.update(editing.value.id, payload)
-    else await webhooksAPI.create(payload)
+    if (editing.value) {
+      await webhooksAPI.update(editing.value.id, payload)
+    } else {
+      const res = await webhooksAPI.create(payload)
+      if (res.data.secret) shownSecret.value = { name: payload.name, secret: res.data.secret }
+    }
     toast(editing.value ? 'Webhook saved' : 'Webhook added')
     drawerOpen.value = false
     await load()
@@ -96,6 +105,18 @@ const save = async () => {
     formError.value = errorMessage(err, 'Could not save webhook')
   } finally {
     saving.value = false
+  }
+}
+
+const rotateSecret = async () => {
+  if (!editing.value) return
+  try {
+    const res = await webhooksAPI.rotateSecret(editing.value.id)
+    shownSecret.value = { name: editing.value.name, secret: res.data.secret }
+    drawerOpen.value = false
+    toast('New signing secret created')
+  } catch (err) {
+    toastError(errorMessage(err, 'Could not rotate the secret'))
   }
 }
 
@@ -129,6 +150,28 @@ onMounted(() => {
       </button>
     </div>
 
+    <Transition
+      enter-active-class="transition duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+      enter-from-class="-translate-y-1 opacity-0"
+    >
+      <div v-if="shownSecret" class="mt-5 rounded-xl bg-success/[0.06] p-4 shadow-[inset_0_0_0_1px_rgba(74,225,118,0.25)]">
+        <div class="flex items-start gap-3">
+          <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0 text-warning" :stroke-width="2" />
+          <p class="flex-1 text-sm text-ink">
+            Signing secret for <strong>{{ shownSecret.name }}</strong>. Copy it now; it will not be shown again.
+            Your receiver uses it to verify the <code class="font-mono text-xs">X-Webhook-Signature</code> header.
+          </p>
+          <button class="text-ink-faint transition hover:text-ink" aria-label="Dismiss" @click="shownSecret = null">
+            <X class="h-4 w-4" :stroke-width="2" />
+          </button>
+        </div>
+        <div class="mt-3 flex items-center gap-2 rounded-lg bg-surface-lowest py-1.5 pl-3 pr-1.5 shadow-ghost">
+          <code class="flex-1 break-all font-mono text-xs text-success">{{ shownSecret.secret }}</code>
+          <CopyButton :value="shownSecret.secret" />
+        </div>
+      </div>
+    </Transition>
+
     <div class="card mt-5 p-2">
       <p v-if="loadError" class="px-4 py-8 text-center text-sm text-critical">{{ loadError }}</p>
       <p v-else-if="!loading && webhooks.length === 0" class="px-4 py-10 text-center text-sm text-ink-muted">No endpoints yet.</p>
@@ -143,7 +186,10 @@ onMounted(() => {
           <span class="h-2 w-2 shrink-0 rounded-full" :class="hook.enabled ? 'bg-success shadow-[0_0_8px_#4ae176]' : 'bg-ink-faint'"></span>
           <div class="min-w-0 flex-1">
             <p class="font-medium text-ink">{{ hook.name }}</p>
-            <p class="mt-0.5 truncate font-mono text-xs text-ink-muted">{{ hook.url }}</p>
+            <p class="mt-0.5 flex items-center gap-1.5 truncate font-mono text-xs text-ink-muted">
+              <LockOpen v-if="isPlainHTTP(hook.url)" class="h-3 w-3 shrink-0 text-warning" :stroke-width="2.2" title="Not encrypted (http://)" />
+              <span class="truncate">{{ hook.url }}</span>
+            </p>
           </div>
           <p class="hidden shrink-0 text-xs text-ink-faint sm:block">
             {{ hook.events.length === supportedEvents.length ? 'All events' : `${hook.events.length} event${hook.events.length === 1 ? '' : 's'}` }}
@@ -196,6 +242,9 @@ onMounted(() => {
         <label class="block">
           <span class="field-label">URL</span>
           <input v-model="form.url" required type="url" placeholder="https://example.com/hooks/licenses" class="field font-mono text-xs" />
+          <span v-if="isPlainHTTP(form.url)" class="field-hint text-warning">
+            Plain http:// sends license keys and customer details unencrypted. Use https:// unless the receiver is on a private network.
+          </span>
         </label>
 
         <div>
@@ -215,6 +264,14 @@ onMounted(() => {
         </div>
 
         <ToggleSwitch v-model="form.enabled" label="Enabled" hint="Paused endpoints keep their settings but receive nothing." />
+
+        <div v-if="editing" class="flex items-center justify-between gap-4 rounded-lg bg-surface-lowest/50 px-3.5 py-3 shadow-ghost">
+          <span>
+            <span class="block text-sm font-medium text-ink">Signing secret</span>
+            <span class="mt-0.5 block text-xs leading-5 text-ink-faint">Rotate to get a new one. The old one stops working immediately.</span>
+          </span>
+          <ConfirmButton size="sm" label="Rotate" confirm-label="Confirm" @confirm="rotateSecret" />
+        </div>
 
         <p v-if="formError" class="rounded-lg bg-critical/10 px-3 py-2 text-sm text-critical">{{ formError }}</p>
       </form>

@@ -17,6 +17,7 @@ type generateRequest struct {
 }
 
 type generateResponse struct {
+	ID         string         `json:"id"`
 	LicenseKey string         `json:"license_key"`
 	Slug       string         `json:"slug"`
 	Status     string         `json:"status"`
@@ -213,6 +214,7 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := generateResponse{
+		ID:         generated.ID,
 		LicenseKey: generated.LicenseKey,
 		Slug:       generated.Slug,
 		Status:     generated.Status,

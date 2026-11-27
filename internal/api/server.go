@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	slugdomain "simple-license-server/internal/domain/slug"
@@ -90,6 +91,8 @@ type Server struct {
 	requestTimeout         time.Duration
 	rateLimiter            *ipRateLimiter
 	authLimiter            *authFailureLimiter
+	verifiedKeysMu         sync.RWMutex
+	verifiedKeys           map[[32]byte]struct{}
 	clientIPHeader         string
 	uiEnabled              bool
 	uiDistDir              string
@@ -163,15 +166,16 @@ type licenseService interface {
 	CreateWebhookEndpoint(ctx context.Context, params storage.CreateWebhookEndpointParams) (storage.WebhookEndpoint, error)
 	UpdateWebhookEndpoint(ctx context.Context, id int64, params storage.UpdateWebhookEndpointParams) (storage.WebhookEndpoint, error)
 	DeleteWebhookEndpoint(ctx context.Context, id int64) error
+	RotateWebhookSecret(ctx context.Context, id int64) (string, error)
 	ListSigningKeys(ctx context.Context) ([]storage.SigningKeyRecord, error)
 	ListPublicSigningKeys(ctx context.Context) ([]storage.SigningKeyRecord, error)
 	GetActiveSigningKey(ctx context.Context) (storage.SigningKeyRecord, error)
 	CreateSigningKey(ctx context.Context, params storage.CreateSigningKeyParams) (storage.SigningKeyRecord, error)
 	ActivateSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
 	RetireSigningKey(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
-	GetLicense(ctx context.Context, licenseKey string) (storage.LicenseDetail, error)
-	UpdateLicense(ctx context.Context, licenseKey string, params storage.UpdateLicenseParams) (storage.UpdatedLicense, error)
-	RemoveActivation(ctx context.Context, licenseKey string, activationID int64) (storage.RemovedActivation, error)
+	GetLicense(ctx context.Context, licenseID string) (storage.LicenseDetail, error)
+	UpdateLicense(ctx context.Context, licenseID string, params storage.UpdateLicenseParams) (storage.UpdatedLicense, error)
+	RemoveActivation(ctx context.Context, licenseID string, activationID int64) (storage.RemovedActivation, error)
 }
 
 func NewServer(service licenseService, logger *slog.Logger, managementAPIKeys map[string]struct{}, requestTimeout time.Duration) *Server {
@@ -219,6 +223,7 @@ func NewServerWithOptions(service licenseService, logger *slog.Logger, managemen
 		offlineTokenIssuer:     strings.TrimSpace(opts.OfflineTokenIssuer),
 		offlineTokenAudience:   strings.TrimSpace(opts.OfflineTokenAudience),
 		clientIPHeader:         strings.TrimSpace(opts.ClientIPHeader),
+		verifiedKeys:           make(map[[32]byte]struct{}),
 		authLimiter:            newAuthFailureLimiter(opts.AuthFailureMaxAttempts, opts.AuthFailureWindow, opts.RateLimitMaxIPEntries),
 		rateLimiter: newIPRateLimiter(rateLimiterConfig{
 			enabled:      opts.RateLimitEnabled,
@@ -252,14 +257,15 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /management/api-keys", s.requireManagementKey(http.HandlerFunc(s.handleCreateAPIKey)))
 	mux.Handle("POST /management/api-keys/{id}/revoke", s.requireManagementKey(http.HandlerFunc(s.handleRevokeAPIKey)))
 	mux.Handle("GET /management/licenses", s.requireManagementKey(http.HandlerFunc(s.handleListLicenses)))
-	mux.Handle("GET /management/licenses/{key}", s.requireManagementKey(http.HandlerFunc(s.handleGetLicense)))
-	mux.Handle("PATCH /management/licenses/{key}", s.requireManagementKey(http.HandlerFunc(s.handleUpdateLicense)))
-	mux.Handle("DELETE /management/licenses/{key}/activations/{id}", s.requireManagementKey(http.HandlerFunc(s.handleRemoveActivation)))
+	mux.Handle("GET /management/licenses/{id}", s.requireManagementKey(http.HandlerFunc(s.handleGetLicense)))
+	mux.Handle("PATCH /management/licenses/{id}", s.requireManagementKey(http.HandlerFunc(s.handleUpdateLicense)))
+	mux.Handle("DELETE /management/licenses/{id}/activations/{activationID}", s.requireManagementKey(http.HandlerFunc(s.handleRemoveActivation)))
 	mux.Handle("GET /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleListWebhooks)))
 	mux.Handle("GET /management/webhooks/deliveries", s.requireManagementKey(http.HandlerFunc(s.handleListWebhookDeliveries)))
 	mux.Handle("POST /management/webhooks", s.requireManagementKey(http.HandlerFunc(s.handleCreateWebhook)))
 	mux.Handle("PATCH /management/webhooks/{id}", s.requireManagementKey(http.HandlerFunc(s.handleUpdateWebhook)))
 	mux.Handle("DELETE /management/webhooks/{id}", s.requireManagementKey(http.HandlerFunc(s.handleDeleteWebhook)))
+	mux.Handle("POST /management/webhooks/{id}/rotate-secret", s.requireManagementKey(http.HandlerFunc(s.handleRotateWebhookSecret)))
 	mux.Handle("GET /management/offline/signing-keys", s.requireManagementKey(http.HandlerFunc(s.handleListSigningKeys)))
 	mux.Handle("POST /management/offline/signing-keys", s.requireManagementKey(http.HandlerFunc(s.handleCreateSigningKey)))
 	mux.Handle("POST /management/offline/signing-keys/{id}/activate", s.requireManagementKey(http.HandlerFunc(s.handleActivateSigningKey)))
@@ -294,15 +300,14 @@ func (s *Server) requireProvisioningKey(next http.Handler) http.Handler {
 			return
 		}
 
-		if s.isAuthorizedManagementKey(apiKey) {
-			next.ServeHTTP(w, r)
-			return
-		}
-
+		// Server keys are a cheap indexed lookup; only fall back to the bcrypt management check.
 		authorized, err := s.service.IsAuthorizedServerAPIKey(r.Context(), apiKey)
 		if err != nil {
 			s.writeUnexpectedError(w, "failed provisioning api key auth", err)
 			return
+		}
+		if !authorized {
+			authorized = s.isAuthorizedManagementKey(apiKey)
 		}
 
 		if !authorized {
@@ -358,8 +363,21 @@ func (s *Server) isAuthorizedManagementKey(candidate string) bool {
 		return false
 	}
 
+	// bcrypt costs ~200ms of CPU per comparison. Once a key has verified, remember its SHA-256 so
+	// later requests with it are instant; only correct keys are cached, so the set stays tiny.
+	digest := sha256.Sum256([]byte(candidate))
+	s.verifiedKeysMu.RLock()
+	_, known := s.verifiedKeys[digest]
+	s.verifiedKeysMu.RUnlock()
+	if known {
+		return true
+	}
+
 	for _, keyHash := range s.managementAPIKeyHashes {
 		if err := bcrypt.CompareHashAndPassword(keyHash, []byte(candidate)); err == nil {
+			s.verifiedKeysMu.Lock()
+			s.verifiedKeys[digest] = struct{}{}
+			s.verifiedKeysMu.Unlock()
 			return true
 		}
 	}

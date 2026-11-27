@@ -70,7 +70,7 @@ const glossaryRows = [
   {
     term: "Revocation",
     meaning:
-      "License-level action that sets status to revoked and blocks activate/validate calls. An operator can restore it later with PATCH /management/licenses/{key}."
+      "License-level action that sets status to revoked and blocks activate/validate calls. An operator can restore it later with PATCH /management/licenses/{id}."
   }
 ];
 

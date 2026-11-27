@@ -108,6 +108,31 @@ const webhookContractExamples = {
 }`
 };
 
+const verifyExample = `import crypto from "node:crypto";
+
+// secret: the whsec_... value shown when the endpoint was created (or rotated).
+// rawBody: the request body exactly as received, before JSON parsing.
+export function verifyWebhook(rawBody, signatureHeader, secret, toleranceSeconds = 300) {
+  const parts = Object.fromEntries(
+    (signatureHeader || "").split(",").map((part) => part.trim().split("="))
+  );
+  const timestamp = Number(parts.t);
+  if (!timestamp || !parts.v1) return false;
+
+  // Reject old deliveries so a captured request can't be replayed later.
+  if (Math.abs(Date.now() / 1000 - timestamp) > toleranceSeconds) return false;
+
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(\`\${parts.t}.\`)
+    .update(rawBody)
+    .digest("hex");
+
+  const a = Buffer.from(expected, "hex");
+  const b = Buffer.from(parts.v1, "hex");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}`;
+
 export default function WebhookConceptsPage() {
   return (
     <section className="docs-content">
@@ -124,7 +149,39 @@ export default function WebhookConceptsPage() {
           <li>Deliveries are queued and retried with backoff on transient failures.</li>
           <li>Each delivery has a stable id across retry attempts.</li>
           <li>Receivers should dedupe by idempotency key to avoid duplicate side effects.</li>
+          <li>Redirects are not followed: a 3xx response fails the delivery. Configure the final URL.</li>
+          <li>
+            Link-local and cloud metadata addresses (such as <code>169.254.169.254</code>) are refused, including
+            hostnames that resolve to them. Private network addresses are allowed for internal receivers.
+          </li>
+          <li>
+            Use <code>https://</code>. Payloads include license keys and customer metadata; the management UI warns
+            about plain <code>http://</code> endpoints.
+          </li>
         </ul>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Verifying signatures</h3>
+        <p>
+          Anyone who knows your receiver&apos;s URL can POST to it, so check that a delivery really came from your
+          server before acting on it. Each endpoint has a signing secret (<code>whsec_...</code>), shown once when you
+          create the endpoint or rotate its secret. Every delivery carries:
+        </p>
+        <ul>
+          <li>
+            <code>X-Webhook-Signature: t=&lt;unix seconds&gt;,v1=&lt;hex&gt;</code>, where <code>v1</code> is the
+            HMAC-SHA256 of <code>&lt;t&gt;.&lt;raw request body&gt;</code> keyed with the secret.
+          </li>
+          <li>Compute the HMAC over the raw body bytes, not re-serialized JSON, and compare in constant time.</li>
+          <li>Reject timestamps more than a few minutes old to stop replays.</li>
+          <li>
+            Rotate with <code>POST /management/webhooks/{"{id}"}/rotate-secret</code> or the Rotate button in
+            Settings → Webhooks. Endpoints from 0.4.0 and earlier received a random secret on upgrade; rotate once to see
+            it.
+          </li>
+        </ul>
+        <CodeExample language="javascript" code={verifyExample} />
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
@@ -133,6 +190,7 @@ export default function WebhookConceptsPage() {
           <li><code>Content-Type: application/json</code></li>
           <li><code>Idempotency-Key: sls-webhook-&lt;delivery_id&gt;</code></li>
           <li><code>X-Webhook-Delivery-Id: &lt;delivery_id&gt;</code></li>
+          <li><code>X-Webhook-Signature: t=&lt;unix seconds&gt;,v1=&lt;hex HMAC-SHA256&gt;</code> (see below)</li>
           <li><code>X-Webhook-Event: &lt;event_type&gt;</code></li>
         </ul>
       </div>
@@ -177,7 +235,7 @@ export default function WebhookConceptsPage() {
           <article className="api-endpoint-prose">
             <h4>license.updated</h4>
             <p>
-              Sent when an operator changes a license with <code>PATCH /management/licenses/{"{key}"}</code>: a new seat
+              Sent when an operator changes a license with <code>PATCH /management/licenses/{"{id}"}</code>: a new seat
               limit, a new expiry, or restoring a revoked license.
             </p>
             <CodeExample language="json" code={webhookContractExamples.updated} />

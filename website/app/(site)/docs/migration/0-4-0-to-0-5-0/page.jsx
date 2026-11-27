@@ -120,20 +120,20 @@ export default function Migration040To050Page() {
         <ul>
           <li>
             <Link href="/docs/api/management-licenses-get/">
-              <code>GET /management/licenses/{"{key}"}</code>
+              <code>GET /management/licenses/{"{id}"}</code>
             </Link>
             : one license with its active devices.
           </li>
           <li>
             <Link href="/docs/api/management-licenses-update/">
-              <code>PATCH /management/licenses/{"{key}"}</code>
+              <code>PATCH /management/licenses/{"{id}"}</code>
             </Link>
             : change <code>max_activations</code> or <code>expires_at</code>, or set <code>revoked</code> to revoke and
             restore. Revoking is no longer permanent.
           </li>
           <li>
             <Link href="/docs/api/management-licenses-remove-activation/">
-              <code>DELETE /management/licenses/{"{key}"}/activations/{"{id}"}</code>
+              <code>DELETE /management/licenses/{"{id}"}/activations/{"{activationID}"}</code>
             </Link>
             : free a device's seat on the customer's behalf.
           </li>
@@ -189,6 +189,36 @@ export default function Migration040To050Page() {
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>6. Security hardening</h3>
+        <ul>
+          <li>
+            <strong>Example secrets are refused.</strong> The server will not start with management keys or signing
+            secrets published in these docs (such as <code>management_key_dev_123456</code>). Generate your own with{" "}
+            <code>openssl rand -hex 32</code>. <code>ALLOW_EXAMPLE_SECRETS=true</code> exists only for local
+            development.
+          </li>
+          <li>
+            <strong>Admin license routes use the license id</strong>, not the key:{" "}
+            <code>/management/licenses/{"{id}"}</code>. License keys no longer appear in URLs or access logs.{" "}
+            <code>POST /api/v1/generate</code> now returns the <code>id</code>; list responses already included it.
+          </li>
+          <li>
+            <strong>Webhooks are signed.</strong> Each delivery has an <code>X-Webhook-Signature</code> header; verify
+            it in your receivers (<Link href="/docs/concepts/webhooks/">how</Link>). Existing endpoints get a random
+            secret on upgrade: rotate it once in Settings → Webhooks to obtain the value.
+          </li>
+          <li>
+            <strong>Webhook delivery rules:</strong> redirects are no longer followed, and link-local / cloud metadata
+            addresses are refused.
+          </li>
+          <li>
+            <strong>The container runs as a non-root user</strong> (uid 65532) instead of root. The API container
+            keeps no files, so no volume changes are needed.
+          </li>
+        </ul>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
         <h3>Required actions</h3>
         <ul>
           <li>Update your backend's <code>/generate</code> and <code>/revoke</code> calls to the <code>/api/v1</code> paths.</li>
@@ -196,6 +226,9 @@ export default function Migration040To050Page() {
           <li>If you filter webhook events, decide whether to subscribe endpoints to <code>license.updated</code>.</li>
           <li>Recommended: set a product on your slugs, and check <code>license.product</code> and the token <code>aud</code> in your apps.</li>
           <li>Replace <code>TRUST_PROXY_HEADERS</code> with <code>CLIENT_IP_HEADER</code> if you run behind a proxy.</li>
+          <li>If you use an example key or signing secret from the docs, replace it before upgrading or the server will not start.</li>
+          <li>Address licenses by <code>id</code> in any tooling that calls the new admin license endpoints.</li>
+          <li>Rotate each webhook endpoint&apos;s secret and add signature verification to your receivers.</li>
           <li>Pull or rebuild the 0.5.0 Docker image. The database migrates itself on startup.</li>
         </ul>
         <p>

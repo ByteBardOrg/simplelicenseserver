@@ -11,13 +11,13 @@ export const metadata = {
 
 const minimalEnvExample = `# Required
 DATABASE_URL=postgres://postgres:postgres@postgres:5432/simple_license_server?sslmode=disable
-MANAGEMENT_API_KEYS=management_key_prod_please_make_this_long_and_random
+MANAGEMENT_API_KEYS=<output of: openssl rand -hex 32>
 
 # Optional
 PORT=8080
 UI_ENABLED=false
 REQUEST_TIMEOUT=15s
-OFFLINE_SIGNING_ENCRYPTION_KEY=replace_with_32_plus_chars_before_creating_signing_keys`;
+OFFLINE_SIGNING_ENCRYPTION_KEY=<output of: openssl rand -hex 32>`;
 
 const optionRows = [
   {
@@ -121,6 +121,12 @@ const optionRows = [
     required: "No",
     defaultValue: "10000",
     description: "Maximum tracked clients. When full, the least recently seen client is dropped; new clients are never refused."
+  },
+  {
+    name: "ALLOW_EXAMPLE_SECRETS",
+    required: "No",
+    defaultValue: "false",
+    description: "The server refuses to start with management keys or signing secrets published in these docs and examples. Set true only for a local development stack that is not reachable from other machines."
   },
   {
     name: "CLIENT_IP_HEADER",
@@ -253,7 +259,11 @@ export default function ConfigurationPage() {
         <h3>Validation notes</h3>
         <ul>
           <li><code>*</code> One of <code>MANAGEMENT_API_KEYS</code> or <code>MANAGEMENT_API_KEY</code> must be set.</li>
-          <li>All API keys must be at least 16 characters.</li>
+          <li>All API keys must be at least 16 characters. Generate them with <code>openssl rand -hex 32</code>.</li>
+          <li>
+            Example secrets from these docs (such as <code>management_key_dev_123456</code>) are refused at startup
+            unless <code>ALLOW_EXAMPLE_SECRETS=true</code>.
+          </li>
           <li>Set <code>UI_ENABLED=true</code> to serve the bundled console at <code>/ui/</code>; <code>/ui</code> redirects there.</li>
           <li>Use <code>POST /management/api-keys</code> to create generated server API keys for <code>/api/v1/generate</code> and <code>/api/v1/revoke</code>.</li>
           <li>All timeout values must be valid Go durations (for example <code>15s</code>, <code>10m</code>).</li>

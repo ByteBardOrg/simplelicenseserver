@@ -197,24 +197,31 @@ export const docsIndex = [
   },
   {
     href: "/docs/api/management-licenses-get/",
-    title: "GET /management/licenses/{key}",
+    title: "GET /management/licenses/{id}",
     summary: "One license with the devices holding its seats.",
     icon: "bx-detail",
     keywords: ["management api", "licenses", "devices", "activations"]
   },
   {
     href: "/docs/api/management-licenses-update/",
-    title: "PATCH /management/licenses/{key}",
+    title: "PATCH /management/licenses/{id}",
     summary: "Change seats or expiry, or revoke and restore a license.",
     icon: "bx-edit",
     keywords: ["management api", "licenses", "renew", "extend", "restore", "seats", "expiry"]
   },
   {
     href: "/docs/api/management-licenses-remove-activation/",
-    title: "DELETE /management/licenses/{key}/activations/{id}",
+    title: "DELETE /management/licenses/{id}/activations/{activationID}",
     summary: "Free a device's seat on a customer's behalf.",
     icon: "bx-unlink",
     keywords: ["management api", "devices", "seats", "deactivate", "transfer"]
+  },
+  {
+    href: "/docs/api/management-webhooks-rotate-secret/",
+    title: "POST /management/webhooks/{id}/rotate-secret",
+    summary: "Replace a webhook endpoint's signing secret.",
+    icon: "bx-key",
+    keywords: ["management api", "webhooks", "signature", "secret", "hmac", "rotate"]
   },
   {
     href: "/docs/api/management-api-keys-list/",

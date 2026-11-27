@@ -66,11 +66,12 @@ export const apiKeysAPI = {
 
 export const licensesAPI = {
   list: (params: { page?: number; page_size?: number; q?: string; status?: string } = {}) => managementApi.get('/licenses', { params }),
-  get: (key: string) => managementApi.get(`/licenses/${encodeURIComponent(key)}`),
-  update: (key: string, data: Partial<{ max_activations: number; expires_at: string | null; revoked: boolean }>) =>
-    managementApi.patch(`/licenses/${encodeURIComponent(key)}`, data),
-  removeActivation: (key: string, activationId: number) =>
-    managementApi.delete(`/licenses/${encodeURIComponent(key)}/activations/${activationId}`),
+  // Admin routes take the license id, never the key, so keys stay out of URLs and access logs.
+  get: (id: string) => managementApi.get(`/licenses/${encodeURIComponent(id)}`),
+  update: (id: string, data: Partial<{ max_activations: number; expires_at: string | null; revoked: boolean }>) =>
+    managementApi.patch(`/licenses/${encodeURIComponent(id)}`, data),
+  removeActivation: (id: string, activationId: number) =>
+    managementApi.delete(`/licenses/${encodeURIComponent(id)}/activations/${activationId}`),
   generate: (data: { slug: string; metadata?: Record<string, any> }) => rootApi.post('/api/v1/generate', data, { headers: managementAuthHeaders() }),
 }
 
@@ -83,6 +84,7 @@ export const webhooksAPI = {
     data: Partial<{ name: string; url: string; events: string[]; enabled: boolean }>,
   ) => managementApi.patch(`/webhooks/${id}`, data),
   delete: (id: number) => managementApi.delete(`/webhooks/${id}`),
+  rotateSecret: (id: number) => managementApi.post(`/webhooks/${id}/rotate-secret`),
 }
 
 export const offlineAPI = {

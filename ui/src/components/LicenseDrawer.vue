@@ -22,7 +22,7 @@ import {
 
 // Shows one license: its limits (editable), the devices using it, and revoke / restore.
 const props = defineProps({
-  licenseKey: { type: String, default: '' },
+  licenseId: { type: String, default: '' },
 })
 
 const emit = defineEmits(['close'])
@@ -44,11 +44,11 @@ const deviceForm = reactive({ fingerprint: '', name: '' })
 const issued = ref(null) // { label, token, expiresAt }
 
 const load = async () => {
-  if (!props.licenseKey) return
+  if (!props.licenseId) return
   loading.value = true
   loadError.value = ''
   try {
-    const res = await licensesAPI.get(props.licenseKey)
+    const res = await licensesAPI.get(props.licenseId)
     license.value = res.data
   } catch (err) {
     loadError.value = errorMessage(err, 'Failed to load license')
@@ -68,7 +68,7 @@ const startEditing = () => {
 const update = async (payload, message) => {
   busy.value = true
   try {
-    const res = await licensesAPI.update(props.licenseKey, payload)
+    const res = await licensesAPI.update(props.licenseId, payload)
     license.value = res.data
     notifyLicensesChanged()
     toast(message)
@@ -99,7 +99,7 @@ const saveLimits = async () => {
 const removeDevice = async (activation) => {
   busy.value = true
   try {
-    const res = await licensesAPI.removeActivation(props.licenseKey, activation.id)
+    const res = await licensesAPI.removeActivation(props.licenseId, activation.id)
     license.value = res.data
     notifyLicensesChanged()
     toast('Device removed, seat freed')
@@ -120,7 +120,7 @@ const addDevice = async () => {
   busy.value = true
   try {
     const res = await runtimeAPI.activate({
-      license_key: props.licenseKey,
+      license_key: license.value.license_key,
       fingerprint,
       metadata: name ? { name } : {},
     })
@@ -145,7 +145,7 @@ const addDevice = async () => {
 const issueToken = async (activation) => {
   busy.value = true
   try {
-    const res = await runtimeAPI.validate({ license_key: props.licenseKey, fingerprint: activation.fingerprint })
+    const res = await runtimeAPI.validate({ license_key: license.value.license_key, fingerprint: activation.fingerprint })
     if (!res.data.valid) {
       toastError(reasonLabel(res.data.reason))
     } else if (!res.data.token) {
@@ -177,7 +177,7 @@ const deviceName = (activation) => {
 }
 
 watch(
-  () => props.licenseKey,
+  () => props.licenseId,
   (key) => {
     editing.value = false
     adding.value = false
@@ -190,7 +190,7 @@ watch(
 </script>
 
 <template>
-  <UiDrawer :open="Boolean(licenseKey)" title="License" @close="emit('close')">
+  <UiDrawer :open="Boolean(licenseId)" title="License" @close="emit('close')">
     <p v-if="loadError" class="rounded-lg bg-critical/10 px-3 py-2 text-sm text-critical">{{ loadError }}</p>
     <div v-else-if="loading && !license" class="space-y-3">
       <div class="h-24 animate-pulse rounded-xl bg-surface-container"></div>

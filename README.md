@@ -18,9 +18,9 @@ License API:
 Management API:
 
 - `GET /management/licenses`
-- `GET /management/licenses/{key}`
-- `PATCH /management/licenses/{key}`
-- `DELETE /management/licenses/{key}/activations/{id}`
+- `GET /management/licenses/{id}`
+- `PATCH /management/licenses/{id}`
+- `DELETE /management/licenses/{id}/activations/{activationID}`
 - `GET /management/slugs`
 - `POST /management/slugs`
 - `GET /management/slugs/{name}`
@@ -33,6 +33,7 @@ Management API:
 - `POST /management/webhooks`
 - `PATCH /management/webhooks/{id}`
 - `DELETE /management/webhooks/{id}`
+- `POST /management/webhooks/{id}/rotate-secret`
 - `GET /management/webhooks/deliveries`
 - `GET /management/offline/signing-keys`
 - `POST /management/offline/signing-keys`
@@ -45,7 +46,7 @@ Management API:
 ## Local development
 
 1. Start Postgres.
-2. Copy `.env.example` values into your environment.
+2. Copy `.env.example` values into your environment and fill in `MANAGEMENT_API_KEYS` and `OFFLINE_SIGNING_ENCRYPTION_KEY` with your own secrets (`openssl rand -hex 32`). Example values published in the docs are refused at startup unless `ALLOW_EXAMPLE_SECRETS=true`.
 3. Run:
 
 ```bash

@@ -14,7 +14,7 @@ const PAGE_SIZE = 15
 const licenses = ref([])
 const loading = ref(false)
 const loadError = ref('')
-const selectedKey = ref('')
+const selectedId = ref('')
 
 const query = ref('')
 const status = ref('')
@@ -149,7 +149,7 @@ onMounted(load)
             </tr>
           </thead>
           <tbody>
-            <tr v-for="license in licenses" :key="license.id" class="is-clickable group" @click="selectedKey = license.license_key">
+            <tr v-for="license in licenses" :key="license.id" class="is-clickable group" @click="selectedId = license.id">
               <td class="w-full max-w-0 sm:min-w-[15rem]">
                 <div class="flex items-center gap-1">
                   <span class="truncate font-mono text-[0.8rem] text-ink">{{ license.license_key }}</span>
@@ -185,6 +185,6 @@ onMounted(load)
       </div>
     </section>
 
-    <LicenseDrawer :license-key="selectedKey" @close="selectedKey = ''" />
+    <LicenseDrawer :license-id="selectedId" @close="selectedId = ''" />
   </div>
 </template>

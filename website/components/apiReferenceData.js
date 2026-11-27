@@ -41,6 +41,7 @@ export const apiEndpointGroups = {
       "management-webhooks-list",
       "management-webhooks-deliveries",
       "management-webhooks-create",
+      "management-webhooks-rotate-secret",
       "management-webhooks-update",
       "management-webhooks-delete",
       "management-offline-signing-keys-list",
@@ -67,7 +68,7 @@ export const apiEndpoints = {
       "Use this endpoint for the Offline Licenses management UI and operator audits."
     ],
     curl: `curl -sS http://localhost:8080/management/offline/signing-keys \
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "signing_keys": [
@@ -109,7 +110,7 @@ export const apiEndpoints = {
       "The encrypted private key is stored server-side; public key material is returned for export."
     ],
     curl: `curl -sS http://localhost:8080/management/offline/signing-keys \
-  -H "Authorization: Bearer management_key_dev_123456" \
+  -H "Authorization: Bearer <management_key>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "desktop-app-2026"
@@ -155,7 +156,7 @@ export const apiEndpoints = {
       "The previously active key is moved to verify_only so older tokens can continue validating until retired."
     ],
     curl: `curl -sS -X POST http://localhost:8080/management/offline/signing-keys/1/activate \
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "id": 1,
@@ -194,7 +195,7 @@ export const apiEndpoints = {
       "Clients that remove the public key will reject existing offline tokens signed by that kid."
     ],
     curl: `curl -sS -X POST http://localhost:8080/management/offline/signing-keys/1/retire \
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "id": 1,
@@ -232,7 +233,7 @@ export const apiEndpoints = {
       "Ship this public verification material with client applications that validate offline JWTs."
     ],
     curl: `curl -sS http://localhost:8080/management/offline/public-keys \
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "signing_keys": [
@@ -294,6 +295,7 @@ export const apiEndpoints = {
   }
 }`,
     responseBody: `{
+  "id": "2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01",
   "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
   "slug": "my-product",
   "status": "inactive",
@@ -310,6 +312,7 @@ export const apiEndpoints = {
   "created_at": "2026-04-20T12:00:00Z"
 }`,
     responseFields: [
+      { name: "id", type: "string", description: "License id (UUID). Store it: the management API addresses licenses by id, never by key." },
       { name: "license_key", type: "string", description: "Generated license key." },
       { name: "slug", type: "string", description: "Slug used at generation time." },
       { name: "status", type: '"inactive" | "active" | "revoked"', description: "Current license status." },
@@ -342,7 +345,7 @@ export const apiEndpoints = {
       "Requires a generated active server API key.",
       "Revocation is license-level, not seat-level.",
       "After revocation, runtime checks return valid=false with reason revoked.",
-      "An operator can restore a revoked license with PATCH /management/licenses/{key} and revoked=false."
+      "An operator can restore a revoked license with PATCH /management/licenses/{id} and revoked=false."
     ],
     curl: `curl -X POST http://localhost:8080/api/v1/revoke \\
   -H "Authorization: Bearer <generated_server_api_key>" \\
@@ -550,7 +553,7 @@ export const apiEndpoints = {
       "Useful for sign-out, reinstalls, and moving to new hardware.",
       "Idempotent: repeated calls never release more than one seat, and license.seats.used shows the result.",
       "valid reflects whether the license itself is still usable (not revoked or expired).",
-      "Operators can also free a seat without the device via DELETE /management/licenses/{key}/activations/{id}.",
+      "Operators can also free a seat without the device via DELETE /management/licenses/{id}/activations/{activationID}.",
       "Returns HTTP 200 for every decided outcome, including unknown keys (valid=false, reason=not_found, license=null). 4xx is only used for malformed requests and rate limits.",
       "Never returns license metadata, slug names, internal ids, or other devices: anyone holding the key can call this endpoint."
     ],
@@ -636,7 +639,7 @@ export const apiEndpoints = {
       "last_validated_at is the latest validation timestamp across this license's activations."
     ],
     curl: `curl -sS "http://localhost:8080/management/licenses?page=1&page_size=10&q=user@example.com&status=active" \
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body; use optional query parameters page, page_size, q, and status)`,
     responseBody: `{
   "licenses": [
@@ -709,17 +712,18 @@ export const apiEndpoints = {
   "management-licenses-get": {
     key: "management-licenses-get",
     group: "management",
-    label: "GET /management/licenses/{key}",
+    label: "GET /management/licenses/{id}",
     method: "GET",
-    path: "/management/licenses/{key}",
+    path: "/management/licenses/{id}",
     title: "Get License",
     summary: "One license with the devices currently holding its seats.",
     details: [
       "Requires management API key auth.",
-      "Only active activations are listed; removed or deactivated devices are not."
+      "Only active activations are listed; removed or deactivated devices are not.",
+      "{id} is the license id (UUID) from POST /api/v1/generate or GET /management/licenses, not the license key. Keeping keys out of URLs keeps them out of access logs."
     ],
-    curl: `curl -sS http://localhost:8080/management/licenses/XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX \\
-  -H "Authorization: Bearer management_key_dev_123456"`,
+    curl: `curl -sS http://localhost:8080/management/licenses/2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01 \\
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "id": "2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01",
@@ -766,9 +770,9 @@ export const apiEndpoints = {
   "management-licenses-update": {
     key: "management-licenses-update",
     group: "management",
-    label: "PATCH /management/licenses/{key}",
+    label: "PATCH /management/licenses/{id}",
     method: "PATCH",
-    path: "/management/licenses/{key}",
+    path: "/management/licenses/{id}",
     title: "Update License",
     summary: "Change a single license's seat limit or expiry, or revoke and restore it.",
     details: [
@@ -779,8 +783,8 @@ export const apiEndpoints = {
       "revoked: false restores a revoked license; its existing devices keep their seats.",
       "Emits license.revoked when the update revokes the license, otherwise license.updated."
     ],
-    curl: `curl -sS -X PATCH http://localhost:8080/management/licenses/XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX \\
-  -H "Authorization: Bearer management_key_dev_123456" \\
+    curl: `curl -sS -X PATCH http://localhost:8080/management/licenses/2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01 \\
+  -H "Authorization: Bearer <management_key>" \\
   -H "Content-Type: application/json" \\
   -d '{
     "max_activations": 5,
@@ -822,7 +826,7 @@ export const apiEndpoints = {
       { name: "max_activations", type: "number (request, optional)", description: "New seat limit. Must be at least 1." },
       { name: "expires_at", type: "string | null (request, optional)", description: "RFC3339 expiry, or null for never." },
       { name: "revoked", type: "boolean (request, optional)", description: "true revokes, false restores." },
-      { name: "(response)", type: "object", description: "The updated license, same shape as GET /management/licenses/{key}." }
+      { name: "(response)", type: "object", description: "The updated license, same shape as GET /management/licenses/{id}." }
     ],
     errorCodes: [
       { status: 400, reason: "No fields sent, max_activations below 1, or expires_at not RFC3339/null." },
@@ -834,9 +838,9 @@ export const apiEndpoints = {
   "management-licenses-remove-activation": {
     key: "management-licenses-remove-activation",
     group: "management",
-    label: "DELETE /management/licenses/{key}/activations/{id}",
+    label: "DELETE /management/licenses/{id}/activations/{activationID}",
     method: "DELETE",
-    path: "/management/licenses/{key}/activations/{id}",
+    path: "/management/licenses/{id}/activations/{activationID}",
     title: "Remove Device",
     summary: "Free a seat on a customer's behalf, for example when their old laptop is gone.",
     details: [
@@ -844,10 +848,10 @@ export const apiEndpoints = {
       "The removed device gets reason fingerprint_not_active on its next validate and can activate again if a seat is free.",
       "Emits license.deactivated with reason removed_by_admin."
     ],
-    curl: `curl -sS -X DELETE http://localhost:8080/management/licenses/XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX/activations/42 \\
-  -H "Authorization: Bearer management_key_dev_123456"`,
+    curl: `curl -sS -X DELETE http://localhost:8080/management/licenses/2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01/activations/42 \\
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
-    responseBody: `(the updated license, same shape as GET /management/licenses/{key})`,
+    responseBody: `(the updated license, same shape as GET /management/licenses/{id})`,
     responseFields: [
       { name: "(response)", type: "object", description: "The license after the seat was freed, including the remaining activations." }
     ],
@@ -873,7 +877,7 @@ export const apiEndpoints = {
       "Slug policies affect newly generated licenses and are snapshotted at issuance time."
     ],
     curl: `curl -sS http://localhost:8080/management/slugs \\
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "slugs": [
@@ -926,7 +930,7 @@ export const apiEndpoints = {
       "attributes is an optional JSON object used for license information snapshots; defaults to {}."
     ],
     curl: `curl -sS http://localhost:8080/management/slugs \\
-  -H "Authorization: Bearer management_key_dev_123456" \\
+  -H "Authorization: Bearer <management_key>" \\
   -H "Content-Type: application/json" \\
   -d '{
     "name": "pro-monthly",
@@ -1008,7 +1012,7 @@ export const apiEndpoints = {
       "Useful for edit forms and operator diagnostics."
     ],
     curl: `curl -sS http://localhost:8080/management/slugs/pro-monthly \\
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "id": 2,
@@ -1059,7 +1063,7 @@ export const apiEndpoints = {
       "Changing a slug only affects newly generated licenses. Existing licenses keep snapshotted policy values."
     ],
     curl: `curl -sS -X PATCH http://localhost:8080/management/slugs/pro-monthly \\
-  -H "Authorization: Bearer management_key_dev_123456" \\
+  -H "Authorization: Bearer <management_key>" \\
   -H "Content-Type: application/json" \\
   -d '{
     "max_activations": 5,
@@ -1135,7 +1139,7 @@ export const apiEndpoints = {
       "Slugs with non-revoked, non-expired licenses cannot be deleted."
     ],
     curl: `curl -sS -X DELETE http://localhost:8080/management/slugs/legacy-beta \\
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "deleted": true
@@ -1165,7 +1169,7 @@ export const apiEndpoints = {
       "Use this for admin listing and revocation workflows."
     ],
     curl: `curl -sS http://localhost:8080/management/api-keys \\
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "api_keys": [
@@ -1200,7 +1204,7 @@ export const apiEndpoints = {
       "Created keys are stored hashed at rest."
     ],
     curl: `curl -sS http://localhost:8080/management/api-keys \\
-  -H "Authorization: Bearer management_key_dev_123456" \\
+  -H "Authorization: Bearer <management_key>" \\
   -H "Content-Type: application/json" \\
   -d '{
     "name": "stripe-prod"
@@ -1240,7 +1244,7 @@ export const apiEndpoints = {
       "Revocation is idempotent and keeps the same revoked_at once set."
     ],
     curl: `curl -sS -X POST http://localhost:8080/management/api-keys/3/revoke \\
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "id": 3,
@@ -1274,7 +1278,7 @@ export const apiEndpoints = {
       "This endpoint only manages configuration; event delivery infrastructure is separate."
     ],
     curl: `curl -sS http://localhost:8080/management/webhooks \\
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "webhooks": [
@@ -1312,7 +1316,7 @@ export const apiEndpoints = {
       "Delivery rows are created only for endpoints that were enabled and subscribed when the event was emitted."
     ],
     curl: `curl -sS "http://localhost:8080/management/webhooks/deliveries?limit=25" \
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body; optional query parameter: limit)`,
     responseBody: `{
   "deliveries": [
@@ -1365,13 +1369,16 @@ export const apiEndpoints = {
     summary: "Create a webhook endpoint configuration for selected event types.",
     details: [
       "Requires management API key auth.",
-      "URL must be absolute and use http or https.",
+      "URL must be absolute and use http or https. Prefer https: payloads include license keys and customer metadata.",
       "Events must be supported values documented in Webhook Concepts.",
+      "The response includes the endpoint's signing secret (whsec_...). It is shown only here; store it in your receiver. Use POST /management/webhooks/{id}/rotate-secret to replace it.",
+      "Every delivery carries X-Webhook-Signature: t=<unix>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\">. Verify it before trusting the event; see Webhook Concepts.",
+      "Redirects are not followed, and link-local / cloud metadata addresses (such as 169.254.169.254) are refused.",
       "Outbound webhook requests include an Idempotency-Key header (sls-webhook-<delivery_id>) for receiver-side dedupe."
     ],
     supportedEvents: webhookSupportedEvents,
     curl: `curl -sS http://localhost:8080/management/webhooks \\
-  -H "Authorization: Bearer management_key_dev_123456" \\
+  -H "Authorization: Bearer <management_key>" \\
   -H "Content-Type: application/json" \\
   -d '{
     "name": "audit-sync",
@@ -1392,9 +1399,11 @@ export const apiEndpoints = {
   "events": ["license.generated", "license.revoked"],
   "enabled": true,
   "created_at": "2026-04-21T12:00:00Z",
-  "updated_at": "2026-04-21T12:00:00Z"
+  "updated_at": "2026-04-21T12:00:00Z",
+  "secret": "whsec_5f1c0e8b7a2d4c3e9f6b1a0d8c7e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e"
 }`,
     responseFields: [
+      { name: "secret", type: "string", description: "Signing secret for verifying deliveries. Returned only when the endpoint is created." },
       { name: "id", type: "number", description: "Webhook endpoint id." },
       { name: "name", type: "string", description: "Operator-friendly endpoint name." },
       { name: "url", type: "string", description: "Destination URL for outbound events." },
@@ -1406,6 +1415,34 @@ export const apiEndpoints = {
     errorCodes: [
       { status: 400, reason: "Invalid JSON, invalid URL, or unsupported event values." },
       { status: 401, reason: "Missing or invalid management API key." },
+      { status: 500, reason: "Unexpected server or storage error." }
+    ]
+  },
+  "management-webhooks-rotate-secret": {
+    key: "management-webhooks-rotate-secret",
+    group: "management",
+    label: "POST /management/webhooks/{id}/rotate-secret",
+    method: "POST",
+    path: "/management/webhooks/{id}/rotate-secret",
+    title: "Rotate Webhook Signing Secret",
+    summary: "Replace an endpoint's signing secret and return the new one.",
+    details: [
+      "Requires management API key auth.",
+      "The old secret stops working immediately, so update your receiver right away.",
+      "Endpoints created before signing existed (0.4.0 and earlier) were given a random secret during upgrade; rotate once to obtain a value."
+    ],
+    curl: `curl -sS -X POST http://localhost:8080/management/webhooks/1/rotate-secret \\
+  -H "Authorization: Bearer <management_key>"`,
+    requestBody: `{} (no request body)`,
+    responseBody: `{
+  "secret": "whsec_5f1c0e8b7a2d4c3e9f6b1a0d8c7e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e"
+}`,
+    responseFields: [
+      { name: "secret", type: "string", description: "The new signing secret. Shown only in this response." }
+    ],
+    errorCodes: [
+      { status: 401, reason: "Missing or invalid management API key." },
+      { status: 404, reason: "Webhook endpoint not found." },
       { status: 500, reason: "Unexpected server or storage error." }
     ]
   },
@@ -1424,7 +1461,7 @@ export const apiEndpoints = {
     ],
     supportedEvents: webhookSupportedEvents,
     curl: `curl -sS -X PATCH http://localhost:8080/management/webhooks/1 \\
-  -H "Authorization: Bearer management_key_dev_123456" \\
+  -H "Authorization: Bearer <management_key>" \\
   -H "Content-Type: application/json" \\
   -d '{
     "enabled": false,
@@ -1467,7 +1504,7 @@ export const apiEndpoints = {
       "Returns a small confirmation payload."
     ],
     curl: `curl -sS -X DELETE http://localhost:8080/management/webhooks/1 \\
-  -H "Authorization: Bearer management_key_dev_123456"`,
+  -H "Authorization: Bearer <management_key>"`,
     requestBody: `{} (no request body)`,
     responseBody: `{
   "deleted": true
@@ -1503,6 +1540,7 @@ export const apiEndpointOrder = [
   "management-webhooks-list",
   "management-webhooks-deliveries",
   "management-webhooks-create",
+  "management-webhooks-rotate-secret",
   "management-webhooks-update",
   "management-webhooks-delete",
   "management-offline-signing-keys-list",

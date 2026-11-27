@@ -53,18 +53,20 @@ type queryer interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-func (s *Store) GetLicense(ctx context.Context, licenseKey string) (LicenseDetail, error) {
-	return getLicenseDetail(ctx, s.db, licenseKey)
+// GetLicense, UpdateLicense and RemoveActivation look licenses up by ID rather than key, so license
+// keys (credentials for the public endpoints) never appear in admin URLs and request logs.
+func (s *Store) GetLicense(ctx context.Context, licenseID string) (LicenseDetail, error) {
+	return getLicenseDetail(ctx, s.db, licenseID)
 }
 
-func (s *Store) UpdateLicense(ctx context.Context, licenseKey string, params UpdateLicenseParams) (UpdatedLicense, error) {
+func (s *Store) UpdateLicense(ctx context.Context, licenseID string, params UpdateLicenseParams) (UpdatedLicense, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return UpdatedLicense{}, fmt.Errorf("begin update license tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	license, err := loadLicenseByKey(ctx, tx, licenseKey, true)
+	license, err := loadLicenseByIDForUpdate(ctx, tx, licenseID)
 	if err != nil {
 		return UpdatedLicense{}, err
 	}
@@ -112,7 +114,7 @@ func (s *Store) UpdateLicense(ctx context.Context, licenseKey string, params Upd
 		}
 	}
 
-	detail, err := getLicenseDetail(ctx, tx, licenseKey)
+	detail, err := getLicenseDetail(ctx, tx, licenseID)
 	if err != nil {
 		return UpdatedLicense{}, err
 	}
@@ -124,14 +126,14 @@ func (s *Store) UpdateLicense(ctx context.Context, licenseKey string, params Upd
 	return UpdatedLicense{Detail: detail, NewlyRevoked: newlyRevoked}, nil
 }
 
-func (s *Store) RemoveActivation(ctx context.Context, licenseKey string, activationID int64) (RemovedActivation, error) {
+func (s *Store) RemoveActivation(ctx context.Context, licenseID string, activationID int64) (RemovedActivation, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return RemovedActivation{}, fmt.Errorf("begin remove activation tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	license, err := loadLicenseByKey(ctx, tx, licenseKey, true)
+	license, err := loadLicenseByIDForUpdate(ctx, tx, licenseID)
 	if err != nil {
 		return RemovedActivation{}, err
 	}
@@ -152,6 +154,10 @@ func (s *Store) RemoveActivation(ctx context.Context, licenseKey string, activat
 		return RemovedActivation{}, fmt.Errorf("remove activation: %w", err)
 	}
 
+	if err := pruneDeactivatedActivations(ctx, tx, license.ID); err != nil {
+		return RemovedActivation{}, err
+	}
+
 	if license.Status != string(licensedomain.StatusRevoked) {
 		seats, err := countActiveSeats(ctx, tx, license.ID)
 		if err != nil {
@@ -162,7 +168,7 @@ func (s *Store) RemoveActivation(ctx context.Context, licenseKey string, activat
 		}
 	}
 
-	detail, err := getLicenseDetail(ctx, tx, licenseKey)
+	detail, err := getLicenseDetail(ctx, tx, licenseID)
 	if err != nil {
 		return RemovedActivation{}, err
 	}
@@ -174,8 +180,8 @@ func (s *Store) RemoveActivation(ctx context.Context, licenseKey string, activat
 	return RemovedActivation{Fingerprint: fingerprint, Detail: detail}, nil
 }
 
-func getLicenseDetail(ctx context.Context, q queryer, licenseKey string) (LicenseDetail, error) {
-	license, err := scanLicenseListRow(q.QueryRow(ctx, licenseRowSelect+` WHERE l.key = $1`, licenseKey))
+func getLicenseDetail(ctx context.Context, q queryer, licenseID string) (LicenseDetail, error) {
+	license, err := scanLicenseListRow(q.QueryRow(ctx, licenseRowSelect+` WHERE l.id = $1`, licenseID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return LicenseDetail{}, ErrNotFound
@@ -223,4 +229,15 @@ func getLicenseDetail(ctx context.Context, q queryer, licenseKey string) (Licens
 	}
 
 	return LicenseDetail{License: license, Activations: activations}, nil
+}
+
+func loadLicenseByIDForUpdate(ctx context.Context, tx pgx.Tx, licenseID string) (LicenseRow, error) {
+	var key string
+	if err := tx.QueryRow(ctx, `SELECT key FROM licenses WHERE id = $1`, licenseID).Scan(&key); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return LicenseRow{}, ErrNotFound
+		}
+		return LicenseRow{}, fmt.Errorf("find license by id: %w", err)
+	}
+	return loadLicenseByKey(ctx, tx, key, true)
 }

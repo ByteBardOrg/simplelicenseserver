@@ -10,7 +10,7 @@ export const metadata = {
 };
 
 const managementAuthExample = `curl -sS http://localhost:8080/management/api-keys \\
-  -H "Authorization: Bearer management_key_dev_123456"`;
+  -H "Authorization: Bearer <management_key>"`;
 
 const serverAuthExample = `curl -sS http://localhost:8080/api/v1/generate \\
   -H "Authorization: Bearer <generated_server_api_key>" \\

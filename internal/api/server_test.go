@@ -52,6 +52,14 @@ type stubService struct {
 	getLicenseFn               func(ctx context.Context, licenseKey string) (storage.LicenseDetail, error)
 	updateLicenseFn            func(ctx context.Context, licenseKey string, params storage.UpdateLicenseParams) (storage.UpdatedLicense, error)
 	removeActivationFn         func(ctx context.Context, licenseKey string, activationID int64) (storage.RemovedActivation, error)
+	rotateWebhookSecretFn      func(ctx context.Context, id int64) (string, error)
+}
+
+func (s stubService) RotateWebhookSecret(ctx context.Context, id int64) (string, error) {
+	if s.rotateWebhookSecretFn != nil {
+		return s.rotateWebhookSecretFn(ctx, id)
+	}
+	return "", storage.ErrNotFound
 }
 
 func (s stubService) GetLicense(ctx context.Context, licenseKey string) (storage.LicenseDetail, error) {
@@ -889,7 +897,7 @@ func TestUpdateLicenseValidation(t *testing.T) {
 		"bad expires_at":     {"expires_at": "next tuesday"},
 		"numeric expires_at": {"expires_at": 12},
 	} {
-		rr := doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/K", body, headers)
+		rr := doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/"+testLicenseID, body, headers)
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("%s: expected 400, got %d body=%s", name, rr.Code, rr.Body.String())
 		}
@@ -916,7 +924,7 @@ func TestUpdateLicenseParamsAndWebhookEvent(t *testing.T) {
 	})
 	headers := map[string]string{"Authorization": "Bearer management_key_dev_123456"}
 
-	rr := doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/K", map[string]any{"expires_at": nil}, headers)
+	rr := doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/"+testLicenseID, map[string]any{"expires_at": nil}, headers)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -924,13 +932,13 @@ func TestUpdateLicenseParamsAndWebhookEvent(t *testing.T) {
 		t.Fatalf("null expires_at should clear expiry and touch nothing else, got %+v", gotParams)
 	}
 
-	rr = doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/K", map[string]any{"expires_at": "2027-05-01T00:00:00Z", "max_activations": 4}, headers)
+	rr = doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/"+testLicenseID, map[string]any{"expires_at": "2027-05-01T00:00:00Z", "max_activations": 4}, headers)
 	if rr.Code != http.StatusOK || gotParams.ExpiresAt == nil || !gotParams.ExpiresAt.Equal(time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)) || *gotParams.MaxActivations != 4 {
 		t.Fatalf("unexpected params %+v (status %d)", gotParams, rr.Code)
 	}
 
 	newlyRevoked = true
-	doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/K", map[string]any{"revoked": true}, headers)
+	doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/"+testLicenseID, map[string]any{"revoked": true}, headers)
 
 	want := []string{webhookEventLicenseUpdated, webhookEventLicenseUpdated, webhookEventLicenseRevoked}
 	if strings.Join(events, ",") != strings.Join(want, ",") {
@@ -940,7 +948,7 @@ func TestUpdateLicenseParamsAndWebhookEvent(t *testing.T) {
 
 func TestRemoveActivationNotFound(t *testing.T) {
 	handler := newTestServer(stubService{})
-	rr := doJSONRequest(t, handler, http.MethodDelete, "/management/licenses/K/activations/9", nil, map[string]string{"Authorization": "Bearer management_key_dev_123456"})
+	rr := doJSONRequest(t, handler, http.MethodDelete, "/management/licenses/"+testLicenseID+"/activations/9", nil, map[string]string{"Authorization": "Bearer management_key_dev_123456"})
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -1019,5 +1027,38 @@ func TestCreateSlugProduct(t *testing.T) {
 	}, headers)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for control characters, got %d", rr.Code)
+	}
+}
+
+const testLicenseID = "8c50f4f7-761d-4bf1-8e09-27a5f7ea0a12"
+
+func TestAdminLicenseRoutesRejectLicenseKeys(t *testing.T) {
+	handler := newTestServer(stubService{})
+	headers := map[string]string{"Authorization": "Bearer management_key_dev_123456"}
+	rr := doJSONRequest(t, handler, http.MethodGet, "/management/licenses/7DB30B-513888-B44E35-593E3E-1F5927", nil, headers)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "UUID") {
+		t.Fatalf("expected 400 asking for the license id, got %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestManagementKeyVerificationIsCached(t *testing.T) {
+	s := NewServerWithOptions(stubService{}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, Options{RequestTimeout: 15 * time.Second})
+
+	start := time.Now()
+	if !s.isAuthorizedManagementKey("management_key_dev_123456") {
+		t.Fatalf("expected key to verify")
+	}
+	first := time.Since(start)
+
+	start = time.Now()
+	if !s.isAuthorizedManagementKey("management_key_dev_123456") {
+		t.Fatalf("expected key to verify again")
+	}
+	if second := time.Since(start); second > first/10 {
+		t.Fatalf("expected cached check to be much faster: first %s, second %s", first, second)
+	}
+
+	if s.isAuthorizedManagementKey("management_key_dev_123457") {
+		t.Fatalf("a different key must not verify")
 	}
 }

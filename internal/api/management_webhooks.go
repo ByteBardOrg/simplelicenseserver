@@ -17,6 +17,12 @@ type webhookEndpointResponse struct {
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Secret is only present in the create response. Use rotate-secret to get a new one.
+	Secret string `json:"secret,omitempty"`
+}
+
+type rotateWebhookSecretResponse struct {
+	Secret string `json:"secret"`
 }
 
 type listWebhookEndpointsResponse struct {
@@ -144,7 +150,29 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, mapWebhookEndpointResponse(created))
+	response := mapWebhookEndpointResponse(created)
+	response.Secret = created.Secret
+	writeJSON(w, http.StatusCreated, response)
+}
+
+func (s *Server) handleRotateWebhookSecret(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePathID(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	secret, err := s.service.RotateWebhookSecret(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "webhook endpoint not found"})
+			return
+		}
+		s.writeUnexpectedError(w, "failed to rotate webhook secret", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, rotateWebhookSecretResponse{Secret: secret})
 }
 
 func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {

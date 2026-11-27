@@ -31,6 +31,17 @@ type Config struct {
 	OfflineSigningKey      string
 	OfflineTokenIssuer     string
 	OfflineTokenAudience   string
+	AllowExampleSecrets    bool
+}
+
+// publishedSecrets are values that appear in this project's docs and examples. Anyone can read them,
+// so the server refuses to run with them unless ALLOW_EXAMPLE_SECRETS=true (local development only).
+var publishedSecrets = map[string]struct{}{
+	"management_key_dev_123456":                               {},
+	"management_key_prod_please_make_this_long_and_random":    {},
+	"development_offline_signing_key_123456":                  {},
+	"change_me_to_at_least_32_chars_long":                     {},
+	"replace_with_32_plus_chars_before_creating_signing_keys": {},
 }
 
 func Load() (Config, error) {
@@ -197,6 +208,16 @@ func Load() (Config, error) {
 	cfg.OfflineTokenIssuer = strings.TrimSpace(getEnv("OFFLINE_TOKEN_ISSUER", cfg.OfflineTokenIssuer))
 	cfg.OfflineTokenAudience = strings.TrimSpace(os.Getenv("OFFLINE_TOKEN_AUDIENCE"))
 
+	cfg.AllowExampleSecrets, err = parseBoolEnv("ALLOW_EXAMPLE_SECRETS", false)
+	if err != nil {
+		return Config{}, err
+	}
+	if !cfg.AllowExampleSecrets {
+		if err := rejectPublishedSecrets(cfg); err != nil {
+			return Config{}, err
+		}
+	}
+
 	if cfg.RateLimitEnabled {
 		if cfg.RateLimitPerIPRPS <= 0 || cfg.RateLimitPerIPBurst <= 0 {
 			return Config{}, fmt.Errorf("RATE_LIMIT_PER_IP_RPS and RATE_LIMIT_PER_IP_BURST must be greater than 0")
@@ -220,6 +241,19 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func rejectPublishedSecrets(cfg Config) error {
+	const howTo = "generate your own with `openssl rand -hex 32` (ALLOW_EXAMPLE_SECRETS=true permits example values for local development only)"
+	for key := range cfg.ManagementAPIKeys {
+		if _, published := publishedSecrets[key]; published {
+			return fmt.Errorf("MANAGEMENT_API_KEYS contains an example key from the public docs: %s", howTo)
+		}
+	}
+	if _, published := publishedSecrets[cfg.OfflineSigningKey]; published {
+		return fmt.Errorf("OFFLINE_SIGNING_ENCRYPTION_KEY is an example value from the public docs: %s", howTo)
+	}
+	return nil
 }
 
 // validateHeaderName accepts an empty name or an HTTP header token such as CF-Connecting-IP.

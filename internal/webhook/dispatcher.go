@@ -3,12 +3,19 @@ package webhook
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"simple-license-server/internal/storage"
@@ -75,7 +82,7 @@ func NewDispatcher(store DeliveryStore, logger *slog.Logger, opts Options) *Disp
 	return &Dispatcher{
 		store:  store,
 		logger: logger,
-		client: &http.Client{Timeout: opts.RequestTimeout},
+		client: newWebhookClient(opts.RequestTimeout),
 		opts:   opts,
 	}
 }
@@ -140,6 +147,9 @@ func (d *Dispatcher) processDelivery(ctx context.Context, delivery storage.Webho
 	req.Header.Set("Idempotency-Key", webhookIdempotencyKey(delivery.ID))
 	req.Header.Set("X-Webhook-Delivery-Id", strconv.FormatInt(delivery.ID, 10))
 	req.Header.Set("X-Webhook-Event", delivery.EventType)
+	if delivery.EndpointSecret != "" {
+		req.Header.Set(SignatureHeader, Sign(delivery.EndpointSecret, time.Now().Unix(), requestBody))
+	}
 
 	resp, err := d.client.Do(req)
 	if err != nil {
@@ -152,6 +162,12 @@ func (d *Dispatcher) processDelivery(ctx context.Context, delivery storage.Webho
 		if err := d.store.MarkWebhookDeliveryDelivered(ctx, delivery.ID, resp.StatusCode); err != nil {
 			d.logger.Error("failed to mark webhook delivery delivered", "delivery_id", delivery.ID, "error", err)
 		}
+		return
+	}
+
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		// Redirects are never followed: a redirect could point the signed payload somewhere else.
+		d.handleDeliveryFailure(ctx, delivery, resp.StatusCode, fmt.Errorf("webhook responded with redirect %d; redirects are not followed, use the final URL", resp.StatusCode), true)
 		return
 	}
 
@@ -199,6 +215,66 @@ func (d *Dispatcher) backoffForAttempt(attempt int) time.Duration {
 	}
 
 	return backoff
+}
+
+// SignatureHeader carries "t=<unix seconds>,v1=<hex HMAC-SHA256>" on every delivery. The HMAC key is
+// the endpoint's secret and the message is "<t>.<raw request body>". Receivers recompute it, compare
+// in constant time, and reject timestamps older than a few minutes to stop replays.
+const SignatureHeader = "X-Webhook-Signature"
+
+// Sign returns the X-Webhook-Signature value for body sent at unix time ts.
+func Sign(secret string, ts int64, body []byte) string {
+	t := strconv.FormatInt(ts, 10)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(t))
+	mac.Write([]byte("."))
+	mac.Write(body)
+	return "t=" + t + ",v1=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+// blockedWebhookPrefixes are never valid webhook targets: link-local ranges hold cloud metadata
+// services (169.254.169.254 and friends) that hand out instance credentials. Private and loopback
+// ranges stay allowed because self-hosted setups commonly deliver to internal services.
+var blockedWebhookPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("169.254.0.0/16"),     // IPv4 link-local, incl. AWS/GCP/Azure metadata
+	netip.MustParsePrefix("fe80::/10"),          // IPv6 link-local
+	netip.MustParsePrefix("fd00:ec2::254/128"),  // AWS IPv6 metadata
+	netip.MustParsePrefix("100.100.100.200/32"), // Alibaba Cloud metadata
+}
+
+var errBlockedWebhookAddress = errors.New("webhook target address is not allowed (link-local or cloud metadata)")
+
+// checkWebhookAddress runs after DNS resolution, right before connecting, so a hostname that
+// resolves to a blocked address (including via DNS rebinding) is refused too.
+func checkWebhookAddress(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return err
+	}
+	ip = ip.Unmap()
+	for _, prefix := range blockedWebhookPrefixes {
+		if prefix.Contains(ip) {
+			return errBlockedWebhookAddress
+		}
+	}
+	return nil
+}
+
+func newWebhookClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: timeout, Control: checkWebhookAddress}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = dialer.DialContext
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func isPermanentHTTPStatus(status int) bool {

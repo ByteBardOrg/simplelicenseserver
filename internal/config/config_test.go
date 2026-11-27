@@ -22,6 +22,7 @@ func clearOptionalTimeoutEnv(t *testing.T) {
 	t.Setenv("RATE_LIMIT_MAX_IP_ENTRIES", "")
 	t.Setenv("TRUST_PROXY_HEADERS", "")
 	t.Setenv("CLIENT_IP_HEADER", "")
+	t.Setenv("ALLOW_EXAMPLE_SECRETS", "true")
 	t.Setenv("AUTH_FAILURE_MAX_ATTEMPTS", "")
 	t.Setenv("AUTH_FAILURE_WINDOW", "")
 	t.Setenv("UI_ENABLED", "")
@@ -223,5 +224,33 @@ func TestLoadRejectsInvalidClientIPHeader(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatalf("expected an error for an invalid header name")
+	}
+}
+
+func TestLoadRejectsPublishedSecrets(t *testing.T) {
+	clearOptionalTimeoutEnv(t)
+	t.Setenv("ALLOW_EXAMPLE_SECRETS", "")
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	t.Setenv("MANAGEMENT_API_KEYS", "my_own_random_key_0123456789,management_key_dev_123456")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "MANAGEMENT_API_KEYS") {
+		t.Fatalf("expected a published management key to be refused, got %v", err)
+	}
+
+	t.Setenv("MANAGEMENT_API_KEYS", "my_own_random_key_0123456789")
+	t.Setenv("OFFLINE_SIGNING_ENCRYPTION_KEY", "change_me_to_at_least_32_chars_long")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "OFFLINE_SIGNING_ENCRYPTION_KEY") {
+		t.Fatalf("expected a published signing secret to be refused, got %v", err)
+	}
+
+	t.Setenv("ALLOW_EXAMPLE_SECRETS", "true")
+	if _, err := Load(); err != nil {
+		t.Fatalf("ALLOW_EXAMPLE_SECRETS=true should permit example values, got %v", err)
+	}
+
+	t.Setenv("ALLOW_EXAMPLE_SECRETS", "")
+	t.Setenv("OFFLINE_SIGNING_ENCRYPTION_KEY", "a_real_secret_that_nobody_published_0123")
+	if _, err := Load(); err != nil {
+		t.Fatalf("own secrets should load, got %v", err)
 	}
 }

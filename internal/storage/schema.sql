@@ -190,6 +190,15 @@ CREATE TABLE IF NOT EXISTS webhook_endpoints (
     CHECK (jsonb_typeof(events) = 'array')
 );
 
+-- Per-endpoint secret used to sign deliveries (HMAC-SHA256), so receivers can verify them.
+ALTER TABLE webhook_endpoints
+    ADD COLUMN IF NOT EXISTS secret TEXT NOT NULL DEFAULT '';
+
+-- Endpoints created before signing existed get a random secret; operators rotate it to see a value.
+UPDATE webhook_endpoints
+SET secret = 'whsec_' || replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')
+WHERE secret = '';
+
 CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_enabled
 ON webhook_endpoints (enabled);
 

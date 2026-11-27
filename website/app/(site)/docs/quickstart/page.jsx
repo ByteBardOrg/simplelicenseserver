@@ -11,13 +11,22 @@ export const metadata = {
 
 const pullImageCommand = "docker pull bytebardorg/simplelicenseserver";
 
+// Secrets are generated locally into .env. Never reuse values from docs: the server refuses the
+// example keys published on this site.
+const generateSecretsCommand = `cat > .env <<EOF
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+MANAGEMENT_API_KEYS=$(openssl rand -hex 32)
+OFFLINE_SIGNING_ENCRYPTION_KEY=$(openssl rand -hex 32)
+EOF
+chmod 600 .env`;
+
 const composeExample = `services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?create .env first (step 2)}
       POSTGRES_DB: simple_license_server
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d simple_license_server"]
@@ -36,14 +45,22 @@ const composeExample = `services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Bound to localhost. To serve it publicly, put a TLS reverse proxy (Caddy, Traefik, nginx,
+    # Cloudflare Tunnel) in front instead of opening this port.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       # REQUIRED: database connection used by the API service.
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/simple_license_server?sslmode=disable
+      DATABASE_URL: postgres://postgres:\${POSTGRES_PASSWORD}@postgres:5432/simple_license_server?sslmode=disable
 
-      # REQUIRED: management bootstrap key (16+ chars). You can also use MANAGEMENT_API_KEY.
-      MANAGEMENT_API_KEYS: management_key_dev_123456
+      # REQUIRED: management (admin) key from .env. You can also use MANAGEMENT_API_KEY.
+      MANAGEMENT_API_KEYS: \${MANAGEMENT_API_KEYS:?create .env first (step 2)}
+
+      # REQUIRED for offline tokens: encrypts signing keys at rest. Keep it stable and secret.
+      OFFLINE_SIGNING_ENCRYPTION_KEY: \${OFFLINE_SIGNING_ENCRYPTION_KEY:?create .env first (step 2)}
+
+      # OPTIONAL: serve the management UI at /ui/.
+      UI_ENABLED: "true"
 
       # OPTIONAL: API listen port (default: 8080).
       PORT: "8080"
@@ -73,8 +90,10 @@ const startComposeCommand = "docker compose up -d";
 
 const verifyHealthCommand = "curl -sS http://localhost:8080/healthz";
 
-const createServerKeyCommand = `curl -sS http://localhost:8080/management/api-keys \\
-  -H "Authorization: Bearer management_key_dev_123456" \\
+const createServerKeyCommand = `MANAGEMENT_KEY=$(grep '^MANAGEMENT_API_KEYS=' .env | cut -d= -f2)
+
+curl -sS http://localhost:8080/management/api-keys \\
+  -H "Authorization: Bearer $MANAGEMENT_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"name":"quickstart"}'`;
 
@@ -95,8 +114,22 @@ export default function QuickstartPage() {
         <CodeExample language="bash" code={pullImageCommand} />
       </div>
 
+      <div className="card" style={{ marginTop: "1rem" }} id="generate-secrets">
+        <h3>2) Generate your secrets</h3>
+        <p>
+          This writes a <code>.env</code> file next to your compose file with random secrets. Docker Compose reads it
+          automatically. Keep it private and back it up: losing <code>OFFLINE_SIGNING_ENCRYPTION_KEY</code> makes your
+          offline signing keys unusable.
+        </p>
+        <CodeExample language="bash" code={generateSecretsCommand} />
+        <p>
+          Don&apos;t copy keys from any documentation, including this site: the server refuses to start with example
+          values published here.
+        </p>
+      </div>
+
       <div className="card" style={{ marginTop: "1rem" }} id="compose-example">
-        <h3>2) Create docker-compose.yml (full settings example)</h3>
+        <h3>3) Create docker-compose.yml (full settings example)</h3>
         <p>
           Save this as <code>docker-compose.yml</code>. The comments call out which API environment variables are
           required and which are optional.
@@ -105,22 +138,26 @@ export default function QuickstartPage() {
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }} id="start-stack">
-        <h3>3) Start the stack</h3>
+        <h3>4) Start the stack</h3>
         <CodeExample language="bash" code={startComposeCommand} />
+        <p>
+          The management UI is then at <code>http://localhost:8080/ui/</code>; sign in with the{" "}
+          <code>MANAGEMENT_API_KEYS</code> value from <code>.env</code>.
+        </p>
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }} id="verify-health">
-        <h3>4) Verify health</h3>
+        <h3>5) Verify health</h3>
         <CodeExample language="bash" code={verifyHealthCommand} />
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }} id="create-server-key">
-        <h3>5) Create your first generated server API key</h3>
+        <h3>6) Create your first generated server API key</h3>
         <CodeExample language="bash" code={createServerKeyCommand} />
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }} id="generate-first-key">
-        <h3>6) Generate your first license key</h3>
+        <h3>7) Generate your first license key</h3>
         <CodeExample language="bash" code={generateKeyCommand} />
       </div>
 

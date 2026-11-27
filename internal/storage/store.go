@@ -40,6 +40,7 @@ type queryable interface {
 }
 
 type GeneratedLicense struct {
+	ID         string
 	LicenseKey string
 	Slug       string
 	Status     string
@@ -148,6 +149,8 @@ type WebhookEndpoint struct {
 	Enabled   bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// Secret is only filled in when an endpoint is created; it is never listed afterwards.
+	Secret string
 }
 
 type CreateWebhookEndpointParams struct {
@@ -165,12 +168,13 @@ type UpdateWebhookEndpointParams struct {
 }
 
 type WebhookDelivery struct {
-	ID          int64
-	EndpointURL string
-	EventType   string
-	Payload     map[string]any
-	Attempts    int
-	CreatedAt   time.Time
+	ID             int64
+	EndpointURL    string
+	EndpointSecret string
+	EventType      string
+	Payload        map[string]any
+	Attempts       int
+	CreatedAt      time.Time
 }
 
 type WebhookDeliveryLog struct {
@@ -409,7 +413,10 @@ func createLicenseFromSlugOptions(ctx context.Context, q queryable, slugName str
 		return GeneratedLicense{}, fmt.Errorf("marshal attributes: %w", err)
 	}
 
-	var createdAt time.Time
+	var (
+		createdAt time.Time
+		licenseID string
+	)
 	licenseKey := ""
 	for i := 0; i < 8; i++ {
 		licenseKey, err = generateLicenseKey()
@@ -420,8 +427,8 @@ func createLicenseFromSlugOptions(ctx context.Context, q queryable, slugName str
 		err = q.QueryRow(ctx, `
 			INSERT INTO licenses (key, slug_id, status, metadata, attributes, expires_at, max_activations)
 			VALUES ($1, $2, 'inactive', $3, $4, $5, $6)
-			RETURNING created_at
-		`, licenseKey, options.SlugID, metadataJSON, attributesJSON, expiresAt, options.MaxActivations).Scan(&createdAt)
+			RETURNING id, created_at
+		`, licenseKey, options.SlugID, metadataJSON, attributesJSON, expiresAt, options.MaxActivations).Scan(&licenseID, &createdAt)
 		if err == nil {
 			break
 		}
@@ -436,6 +443,7 @@ func createLicenseFromSlugOptions(ctx context.Context, q queryable, slugName str
 	}
 
 	return GeneratedLicense{
+		ID:         licenseID,
 		LicenseKey: licenseKey,
 		Slug:       slugName,
 		Status:     "inactive",
@@ -467,6 +475,7 @@ func getIdempotencyRecordTx(ctx context.Context, tx pgx.Tx, endpoint, key string
 
 func marshalGenerateResponseBody(generated GeneratedLicense) ([]byte, error) {
 	payload := struct {
+		ID         string         `json:"id"`
 		LicenseKey string         `json:"license_key"`
 		Slug       string         `json:"slug"`
 		Status     string         `json:"status"`
@@ -475,6 +484,7 @@ func marshalGenerateResponseBody(generated GeneratedLicense) ([]byte, error) {
 		ExpiresAt  *time.Time     `json:"expires_at"`
 		CreatedAt  time.Time      `json:"created_at"`
 	}{
+		ID:         generated.ID,
 		LicenseKey: generated.LicenseKey,
 		Slug:       generated.Slug,
 		Status:     generated.Status,
@@ -800,6 +810,12 @@ func (s *Store) DeactivateLicense(ctx context.Context, licenseKey, fingerprint, 
 		}
 	}
 
+	if released {
+		if err := pruneDeactivatedActivations(ctx, tx, license.ID); err != nil {
+			return DeactivationResult{}, err
+		}
+	}
+
 	activeSeats, err := countActiveSeats(ctx, tx, license.ID)
 	if err != nil {
 		return DeactivationResult{}, err
@@ -1007,11 +1023,17 @@ func (s *Store) CreateWebhookEndpoint(ctx context.Context, params CreateWebhookE
 		eventsRaw []byte
 	)
 
+	secret, err := generateWebhookSecret()
+	if err != nil {
+		return WebhookEndpoint{}, err
+	}
+	endpoint.Secret = secret
+
 	err = s.db.QueryRow(ctx, `
-		INSERT INTO webhook_endpoints (name, url, events, enabled)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO webhook_endpoints (name, url, events, enabled, secret)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, name, url, events, enabled, created_at, updated_at
-	`, params.Name, params.URL, eventsJSON, params.Enabled).Scan(
+	`, params.Name, params.URL, eventsJSON, params.Enabled, secret).Scan(
 		&endpoint.ID,
 		&endpoint.Name,
 		&endpoint.URL,
@@ -1185,7 +1207,8 @@ func (s *Store) ClaimWebhookDeliveries(ctx context.Context, limit int) ([]Webhoo
 		          d.payload,
 		          d.attempts,
 		          d.created_at,
-		          (SELECT w.url FROM webhook_endpoints w WHERE w.id = d.endpoint_id)
+		          (SELECT w.url FROM webhook_endpoints w WHERE w.id = d.endpoint_id),
+		          (SELECT w.secret FROM webhook_endpoints w WHERE w.id = d.endpoint_id)
 	`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("claim webhook deliveries: %w", err)
@@ -1206,6 +1229,7 @@ func (s *Store) ClaimWebhookDeliveries(ctx context.Context, limit int) ([]Webhoo
 			&delivery.Attempts,
 			&delivery.CreatedAt,
 			&delivery.EndpointURL,
+			&delivery.EndpointSecret,
 		); err != nil {
 			return nil, fmt.Errorf("scan claimed webhook delivery: %w", err)
 		}
@@ -1481,6 +1505,29 @@ func findActiveActivationID(ctx context.Context, tx pgx.Tx, licenseID, fingerpri
 	return activationID, nil
 }
 
+// keptDeactivatedActivations bounds the deactivation history per license. Anyone holding a license
+// key can cycle activate/deactivate, and without a cap every cycle would add a row forever.
+const keptDeactivatedActivations = 100
+
+func pruneDeactivatedActivations(ctx context.Context, tx pgx.Tx, licenseID string) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM activations
+		WHERE license_id = $1
+		  AND deactivated_at IS NOT NULL
+		  AND id NOT IN (
+		      SELECT id
+		      FROM activations
+		      WHERE license_id = $1
+		        AND deactivated_at IS NOT NULL
+		      ORDER BY deactivated_at DESC, id DESC
+		      LIMIT $2
+		  )
+	`, licenseID, keptDeactivatedActivations); err != nil {
+		return fmt.Errorf("prune deactivated activations: %w", err)
+	}
+	return nil
+}
+
 func countActiveSeats(ctx context.Context, tx pgx.Tx, licenseID string) (int, error) {
 	var seats int
 	err := tx.QueryRow(ctx, `
@@ -1585,6 +1632,31 @@ func generateAPIKeyValue() (string, error) {
 
 	encoded := strings.ToLower(hex.EncodeToString(buf))
 	return encoded, nil
+}
+
+// generateWebhookSecret returns a new signing secret, e.g. whsec_<64 hex chars>.
+func generateWebhookSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate webhook secret: %w", err)
+	}
+	return "whsec_" + hex.EncodeToString(buf), nil
+}
+
+// RotateWebhookSecret replaces an endpoint's signing secret and returns the new one.
+func (s *Store) RotateWebhookSecret(ctx context.Context, id int64) (string, error) {
+	secret, err := generateWebhookSecret()
+	if err != nil {
+		return "", err
+	}
+	tag, err := s.db.Exec(ctx, `UPDATE webhook_endpoints SET secret = $1, updated_at = NOW() WHERE id = $2`, secret, id)
+	if err != nil {
+		return "", fmt.Errorf("rotate webhook secret: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return "", ErrNotFound
+	}
+	return secret, nil
 }
 
 func hashAPIKey(raw string) string {

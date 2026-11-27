@@ -79,6 +79,9 @@ func TestIntegrationLicenseLifecycleFlow(t *testing.T) {
 	if strings.TrimSpace(generated.LicenseKey) == "" {
 		t.Fatalf("expected non-empty license key")
 	}
+	if generated.ID == "" {
+		t.Fatalf("expected generate to return the license id")
+	}
 	if generated.Status != "inactive" {
 		t.Fatalf("expected generated status inactive, got %q", generated.Status)
 	}
@@ -153,7 +156,7 @@ func TestIntegrationLicenseLifecycleFlow(t *testing.T) {
 	}
 
 	adminHeaders := map[string]string{"Authorization": "Bearer " + managementKey}
-	licensePath := "/management/licenses/" + generated.LicenseKey
+	licensePath := "/management/licenses/" + generated.ID
 
 	// Restore the revoked license and raise its seat count; the existing device comes back with it.
 	restoreRes := doJSONRequest(t, handler, http.MethodPatch, licensePath, map[string]any{
@@ -209,6 +212,25 @@ func TestIntegrationLicenseLifecycleFlow(t *testing.T) {
 	if productActivated.License == nil || productActivated.License.Product == nil || *productActivated.License.Product != "integration-app" {
 		t.Fatalf("expected license.product integration-app, got %s", productActivateRes.Body.String())
 	}
+
+	// Webhook endpoints get a signing secret that is shown once and can be rotated.
+	createHookRes := doJSONRequest(t, handler, http.MethodPost, "/management/webhooks", map[string]any{
+		"name": "integration-" + flowSuffix, "url": "https://example.com/hooks", "events": []string{"license.generated"}, "enabled": false,
+	}, adminHeaders)
+	createdHook := decodeJSONResponse[webhookEndpointResponse](t, createHookRes)
+	if createHookRes.Code != http.StatusCreated || !strings.HasPrefix(createdHook.Secret, "whsec_") {
+		t.Fatalf("expected a whsec_ secret on create, got %d %s", createHookRes.Code, createHookRes.Body.String())
+	}
+	listHooksRes := doJSONRequest(t, handler, http.MethodGet, "/management/webhooks", nil, adminHeaders)
+	if strings.Contains(listHooksRes.Body.String(), createdHook.Secret) || strings.Contains(listHooksRes.Body.String(), `"secret"`) {
+		t.Fatalf("webhook secrets must never be listed: %s", listHooksRes.Body.String())
+	}
+	rotateRes := doJSONRequest(t, handler, http.MethodPost, fmt.Sprintf("/management/webhooks/%d/rotate-secret", createdHook.ID), nil, adminHeaders)
+	rotated := decodeJSONResponse[rotateWebhookSecretResponse](t, rotateRes)
+	if rotateRes.Code != http.StatusOK || !strings.HasPrefix(rotated.Secret, "whsec_") || rotated.Secret == createdHook.Secret {
+		t.Fatalf("expected a new secret from rotate, got %d %s", rotateRes.Code, rotateRes.Body.String())
+	}
+	doJSONRequest(t, handler, http.MethodDelete, fmt.Sprintf("/management/webhooks/%d", createdHook.ID), nil, adminHeaders)
 
 	// Unknown keys get the same 200 shape with reason not_found.
 	unknownRes := doJSONRequest(t, handler, http.MethodPost, "/api/v1/validate", validateRequest{

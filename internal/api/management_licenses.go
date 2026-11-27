@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -184,12 +185,12 @@ type updateLicenseRequest struct {
 }
 
 func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
-	licenseKey, ok := licenseKeyFromPath(w, r)
+	licenseID, ok := licenseIDFromPath(w, r)
 	if !ok {
 		return
 	}
 
-	detail, err := s.service.GetLicense(r.Context(), licenseKey)
+	detail, err := s.service.GetLicense(r.Context(), licenseID)
 	if err != nil {
 		s.writeLicenseLookupError(w, err, "failed to get license")
 		return
@@ -199,7 +200,7 @@ func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateLicense(w http.ResponseWriter, r *http.Request) {
-	licenseKey, ok := licenseKeyFromPath(w, r)
+	licenseID, ok := licenseIDFromPath(w, r)
 	if !ok {
 		return
 	}
@@ -237,7 +238,7 @@ func (s *Server) handleUpdateLicense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := s.service.UpdateLicense(r.Context(), licenseKey, params)
+	updated, err := s.service.UpdateLicense(r.Context(), licenseID, params)
 	if err != nil {
 		s.writeLicenseLookupError(w, err, "failed to update license")
 		return
@@ -261,18 +262,18 @@ func (s *Server) handleUpdateLicense(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveActivation(w http.ResponseWriter, r *http.Request) {
-	licenseKey, ok := licenseKeyFromPath(w, r)
+	licenseID, ok := licenseIDFromPath(w, r)
 	if !ok {
 		return
 	}
 
-	activationID, err := parsePathID(r.PathValue("id"))
+	activationID, err := parsePathID(r.PathValue("activationID"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
 
-	removed, err := s.service.RemoveActivation(r.Context(), licenseKey, activationID)
+	removed, err := s.service.RemoveActivation(r.Context(), licenseID, activationID)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "license or activation not found"})
@@ -297,17 +298,17 @@ func (s *Server) handleRemoveActivation(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, mapLicenseDetailResponse(removed.Detail))
 }
 
-func licenseKeyFromPath(w http.ResponseWriter, r *http.Request) (string, bool) {
-	licenseKey := strings.TrimSpace(r.PathValue("key"))
-	if err := requireField(licenseKey, "license key"); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+var licenseIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// licenseIDFromPath reads the license ID (a UUID) from admin URLs. Admin routes never take the
+// license key, so keys don't end up in access logs.
+func licenseIDFromPath(w http.ResponseWriter, r *http.Request) (string, bool) {
+	licenseID := strings.TrimSpace(r.PathValue("id"))
+	if !licenseIDPattern.MatchString(licenseID) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "license id must be a UUID (the id field of a license, not its key)"})
 		return "", false
 	}
-	if err := validateFieldLength(licenseKey, "license key", maxLicenseKeyLength); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-		return "", false
-	}
-	return licenseKey, true
+	return strings.ToLower(licenseID), true
 }
 
 func (s *Server) writeLicenseLookupError(w http.ResponseWriter, err error, message string) {
