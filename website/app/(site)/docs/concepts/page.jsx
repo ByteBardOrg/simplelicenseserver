@@ -1,0 +1,290 @@
+import Link from "next/link";
+import CodeExample from "../../../../components/CodeExample";
+
+export const metadata = {
+  title: "Concepts",
+  description:
+    "Core concepts in Simple License Server: slugs, licenses, seats, expiration, and License API vs Management API flows.",
+  alternates: {
+    canonical: "/docs/concepts/"
+  }
+};
+
+
+const glossaryRows = [
+  {
+    term: "Slug",
+    meaning:
+      "Policy template for newly generated licenses. Controls max activations, expiration policy, offline policy, and attributes for licenses created under it."
+  },
+  {
+    term: "License",
+    meaning:
+      "Issued key tied to a slug. Stores status, metadata, created time, resolved expires_at, and snapshotted slug attributes."
+  },
+  {
+    term: "Seat",
+    meaning:
+      "One active fingerprint binding for a license. Seats are represented by active rows in activations."
+  },
+  {
+    term: "Fingerprint",
+    meaning:
+      "Device/app-instance identifier sent by your client to activate, validate, and deactivate."
+  },
+  {
+    term: "Offline token",
+    meaning:
+      "Short-lived JWT returned on valid activation/validation when the license slug has offline_enabled=true and an active signing key exists. Lifetime is set by the slug."
+  },
+  {
+    term: "Signing key",
+    meaning:
+      "Ed25519 key pair used to sign offline JWTs. The server stores encrypted private keys and exports public keys for clients."
+  },
+  {
+    term: "License API",
+    meaning:
+      "License lifecycle endpoints. /api/v1/generate and /api/v1/revoke require a generated server API key; runtime routes are called by your app."
+  },
+  {
+    term: "Management API",
+    meaning:
+      "Operator/internal endpoints under /management/* that require a management bootstrap key."
+  },
+  {
+    term: "Management UI",
+    meaning:
+      "Optional bundled operator console served from /ui/ when UI_ENABLED=true. It uses a management API key for operator actions."
+  },
+  {
+    term: "Runtime API",
+    meaning:
+      "Client-facing endpoints (/api/v1/activate, /api/v1/validate, /api/v1/deactivate) used by your shipped app."
+  },
+  {
+    term: "Idempotency-Key",
+    meaning:
+      "Header used on /api/v1/generate to make webhook retries safe and avoid duplicate license issuance."
+  },
+  {
+    term: "Revocation",
+    meaning:
+      "License-level action that sets status to revoked and blocks activate/validate calls. An operator can restore it later with PATCH /management/licenses/{id}."
+  }
+];
+
+const metadataVsAttributesExample = `{
+  "license_key": "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
+  "slug": "pro-eu",
+  "metadata": {
+    "email": "user@example.com",
+    "external_customer_id": "cus_123",
+    "external_order_id": "ord_456"
+  },
+  "attributes": {
+    "sku": "PRO-EU",
+    "edition": "pro",
+    "features": ["sync", "audit-log"],
+    "channel": "direct"
+  }
+}`;
+
+function GlossaryTable({ rows }) {
+  return (
+    <div className="docs-table-wrap">
+      <table className="docs-table">
+        <thead>
+          <tr>
+            <th scope="col">Concept</th>
+            <th scope="col">Meaning</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.term}>
+              <td>
+                <strong>{row.term}</strong>
+              </td>
+              <td>{row.meaning}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default function ConceptsPage() {
+  return (
+    <section className="docs-content">
+      <p className="eyebrow">Concepts</p>
+      <h1>How the license model works</h1>
+      <p>
+        This is the mental model behind Simple License Server. If you understand these concepts, the endpoint behavior
+        is straightforward.
+      </p>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>System flow in plain language</h3>
+        <ol>
+          <li>You define a slug (policy template) for a product or plan.</li>
+          <li>Your trusted backend calls <code>POST /api/v1/generate</code> with that slug.</li>
+          <li>The server creates a license key with expiration and seat limits resolved at that moment.</li>
+          <li>The client app activates the license with a fingerprint, consuming a seat.</li>
+          <li>The client periodically validates the same license+fingerprint pair.</li>
+          <li>Seats can be released with <code>POST /api/v1/deactivate</code>; full access can be blocked with <code>POST /api/v1/revoke</code>.</li>
+          <li>
+            Operators can change a license's seats or expiry, restore a revoked license, and free a device's seat from
+            the management API or UI.
+          </li>
+        </ol>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>What is a slug?</h3>
+        <p>
+          A slug is a policy anchor for new licenses. It does not represent a customer; it represents how licenses
+          should behave when they are created.
+        </p>
+        <ul>
+          <li>Defines <code>max_activations</code> (seat limit).</li>
+          <li>Defines expiration policy (<code>forever</code>, <code>duration</code>, or <code>fixed_date</code>).</li>
+          <li>Defines whether offline JWTs are issued with <code>offline_enabled</code> and how long they last with <code>offline_token_lifetime_hours</code>.</li>
+          <li>Defines <code>attributes</code> (JSON object) for plan/features or other license information.</li>
+          <li>Is resolved at generation time, then stored on the license record.</li>
+          <li>Changing a slug later affects future licenses, not already-issued ones.</li>
+        </ul>
+        <p>
+          By default, the server creates a <code>default</code> slug with one seat and no expiration.
+        </p>
+        <p style={{ marginTop: "0.7rem" }}>
+          Want a deeper view of naming rules and policy snapshots? See <Link href="/docs/concepts/slugs/">Slug concepts</Link>.
+        </p>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Metadata vs attributes</h3>
+        <p>
+          Both fields are JSON objects, but they come from different sources and serve different jobs.
+        </p>
+        <ul>
+          <li>
+            <code>metadata</code> on <code>POST /api/v1/generate</code>: caller-provided license context persisted on the
+            license record (for example customer ids, order ids, support lookup fields).
+          </li>
+          <li>
+            <code>metadata</code> on <code>POST /api/v1/activate</code>: fingerprint-level context stored on the activation
+            seat record when a new seat is created. It is not currently returned in license responses, webhook payloads,
+            or offline JWT claims.
+          </li>
+          <li>
+            Re-activating an already-active fingerprint refreshes validation timing, but does not overwrite existing
+            activation metadata.
+          </li>
+          <li>
+            <code>attributes</code>: slug-defined entitlement data (for example SKU, edition, features, channel)
+            snapshotted onto the license at generation time.
+          </li>
+          <li>
+            Slug changes later affect future licenses only; existing licenses keep the attributes snapshot they were
+            created with.
+          </li>
+        </ul>
+        <p>Example generated license payload:</p>
+        <CodeExample language="json" code={metadataVsAttributesExample} />
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Offline licenses</h3>
+        <p>
+          Offline licenses are optional short-lived JWTs. They are controlled per slug and refreshed by valid online
+          validation calls.
+        </p>
+        <ul>
+          <li>All slugs default to offline disabled.</li>
+          <li><code>/api/v1/activate</code> and <code>/api/v1/validate</code> include <code>token</code> only when the slug allows offline use.</li>
+          <li>Clients verify tokens with exported public signing keys.</li>
+        </ul>
+        <p style={{ marginTop: "0.7rem" }}>
+          For signing key lifecycle, claims, and revocation tradeoffs, see <Link href="/docs/concepts/offline-licenses/">Offline license concepts</Link>.
+        </p>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>How seats work</h3>
+        <p>
+          Seats are tracked as active activation rows per fingerprint. A seat is in use when that fingerprint has an
+          activation with no <code>deactivated_at</code> value.
+        </p>
+        <ul>
+          <li><code>/api/v1/activate</code> with a new fingerprint creates a seat if the license still has capacity.</li>
+          <li>Calling <code>/api/v1/activate</code> again for an already-active fingerprint does not consume another seat.</li>
+          <li><code>/api/v1/deactivate</code> releases that fingerprint seat immediately.</li>
+          <li>Revocation is different: <code>/api/v1/revoke</code> blocks the whole license, not one seat.</li>
+        </ul>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>License API vs Management API</h3>
+        <ul>
+          <li>
+            <strong>License API</strong>: <code>/api/v1/generate</code>, <code>/api/v1/revoke</code>, <code>/api/v1/activate</code>,
+            <code>/api/v1/validate</code>, <code>/api/v1/deactivate</code>.
+          </li>
+          <li>
+            <strong>Management API</strong>: <code>/management/slugs</code>, <code>/management/api-keys</code>, and
+            <code> /management/webhooks</code> routes for operator tooling and frontend-backed workflows.
+          </li>
+          <li>Never call key-protected routes directly from customer-facing browser code.</li>
+          <li>For payment webhooks, use provider event id as <code>Idempotency-Key</code> on <code>/api/v1/generate</code>.</li>
+        </ul>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Management UI</h3>
+        <p>
+          The bundled operator console is available at <code>/ui/</code> when <code>UI_ENABLED=true</code>. It provides a
+          browser interface for license, slug, API key, webhook, and offline-license management.
+        </p>
+        <p style={{ marginTop: "0.7rem" }}>
+          For access, authentication, and deployment notes, see <Link href="/docs/concepts/management-ui/">Management UI concepts</Link>.
+        </p>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Outbound webhooks and idempotency</h3>
+        <p>
+          Outbound webhooks are asynchronous delivery jobs. Endpoint configuration lives in Management API, and
+          delivery is triggered by License API events.
+        </p>
+        <ul>
+          <li>
+            Delivery retries can happen, so receivers should dedupe using <code>Idempotency-Key: sls-webhook-&lt;delivery_id&gt;</code>.
+          </li>
+          <li>
+            Additional headers include <code>X-Webhook-Delivery-Id</code> and <code>X-Webhook-Event</code>.
+          </li>
+          <li>
+            Payload shape includes top-level <code>id</code>, <code>type</code>, <code>attempt</code>, <code>occurred_at</code>, and a
+            <code> data</code> object with event-specific fields.
+          </li>
+          <li>
+            Current event types: <code>license.generated</code>, <code>license.activated</code>, <code>license.deactivated</code>,
+            <code> license.validated</code>, <code>license.validation_failed</code>, <code>license.revoked</code>,
+            <code> license.updated</code>.
+          </li>
+        </ul>
+        <p style={{ marginTop: "0.7rem" }}>
+          For full contract details (headers, envelope, and event payload schemas), see{" "}
+          <Link href="/docs/concepts/webhooks/">Webhook concepts</Link>.
+        </p>
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h3>Glossary</h3>
+        <GlossaryTable rows={glossaryRows} />
+      </div>
+    </section>
+  );
+}

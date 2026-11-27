@@ -1,68 +1,55 @@
 <script setup>
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { LogOut, Plus } from 'lucide-vue-next'
+import BrandMark from '@/components/BrandMark.vue'
 import { useAuthStore } from '@/stores/auth'
+import { openIssueDrawer } from '@/lib/ui'
 
-const props = defineProps({
-  activePage: {
-    type: String,
-    default: '',
-  },
-})
-
-const authStore = useAuthStore()
+const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const pages = [
   { name: 'Licenses', path: '/licenses' },
   { name: 'Slugs', path: '/slugs' },
-  { name: 'API Keys', path: '/api-keys' },
-  { name: 'Webhooks', path: '/webhooks' },
-  { name: 'Offline Licenses', path: '/offline-licenses' },
+  { name: 'Settings', path: '/settings' },
 ]
 
-const isActive = (pageName) => props.activePage === pageName
+const isActive = (path) => route.path === path || route.path.startsWith(`${path}/`)
 
 const logout = () => {
   authStore.clearApiKey()
   router.push('/licenses')
 }
-
-const openGenerateDrawer = () => {
-  window.dispatchEvent(new CustomEvent('open-generate-license'))
-}
 </script>
 
 <template>
-  <header class="sticky top-0 z-40 bg-[#0a0e18] shadow-[inset_0_-1px_rgba(65,71,81,0.22)]">
-    <div class="mx-auto flex min-h-14 w-full max-w-[88rem] items-center gap-5 px-4 sm:px-6 lg:px-8">
-      <div class="flex min-w-0 items-center">
-        <router-link to="/licenses" class="shrink-0 text-base font-extrabold tracking-tight text-white sm:text-lg">
-          LicenseManager
-        </router-link>
-      </div>
+  <header class="glass sticky top-0 z-40 shadow-[inset_0_-1px_rgba(65,71,81,0.25)]">
+    <div class="mx-auto flex h-16 w-full max-w-6xl items-center gap-2 px-3 sm:gap-6 sm:px-6">
+      <router-link to="/licenses" class="flex shrink-0 items-center gap-2.5">
+        <BrandMark size="h-7 w-7" />
+        <span class="hidden text-[0.95rem] font-semibold tracking-tight text-ink-strong md:inline">Simple License Server</span>
+      </router-link>
 
-      <nav class="flex min-w-0 flex-1 items-center gap-5 overflow-x-auto text-xs font-semibold md:gap-7">
+      <nav class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto sm:gap-1">
         <router-link
           v-for="page in pages"
           :key="page.path"
           :to="page.path"
-          :class="[
-            'relative whitespace-nowrap py-5 transition-colors',
-            isActive(page.name)
-              ? 'text-white after:absolute after:bottom-0 after:left-0 after:h-px after:w-full after:bg-[#a4c9ff]'
-              : 'text-[#8f98ad] hover:text-[#dfe2f1]'
-          ]"
+          class="whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors sm:px-3"
+          :class="isActive(page.path) ? 'bg-surface-container text-ink-strong shadow-ghost' : 'text-ink-muted hover:text-ink'"
         >
           {{ page.name }}
         </router-link>
       </nav>
 
-      <button class="primary-action hidden shrink-0 px-4 py-2 text-xs sm:inline-flex" @click="openGenerateDrawer">
-        + Generate Key
+      <button class="btn-primary shrink-0 px-3 py-1.5" @click="openIssueDrawer">
+        <Plus class="h-4 w-4" :stroke-width="2.4" />
+        <span class="hidden sm:inline">New license</span>
       </button>
 
-      <button class="secondary-action shrink-0 px-3 py-2 metadata-label text-[0.65rem]" @click="logout">
-        Logout
+      <button class="btn-icon shrink-0" title="Sign out" aria-label="Sign out" @click="logout">
+        <LogOut class="h-4 w-4" :stroke-width="1.8" />
       </button>
     </div>
   </header>

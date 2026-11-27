@@ -127,3 +127,32 @@ func mustRehydrate(t *testing.T, params RehydrateParams) *License {
 	}
 	return lic
 }
+
+func TestStanding(t *testing.T) {
+	past := time.Now().UTC().Add(-time.Minute)
+	cases := []struct {
+		name      string
+		params    RehydrateParams
+		wantValid bool
+		want      Reason
+	}{
+		{"active", RehydrateParams{Status: string(StatusActive), MaxActivations: 1}, true, ReasonNone},
+		{"revoked", RehydrateParams{Status: string(StatusRevoked), MaxActivations: 1}, false, ReasonRevoked},
+		{"expired", RehydrateParams{Status: string(StatusInactive), MaxActivations: 1, ExpiresAt: &past}, false, ReasonExpired},
+		{"revoked wins over expired", RehydrateParams{Status: string(StatusRevoked), MaxActivations: 1, ExpiresAt: &past}, false, ReasonRevoked},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			valid, reason := mustRehydrate(t, tc.params).Standing(time.Now().UTC())
+			if valid != tc.wantValid || reason != tc.want {
+				t.Fatalf("got (%v, %q), want (%v, %q)", valid, reason, tc.wantValid, tc.want)
+			}
+		})
+	}
+}
+
+func TestStatusForSeats(t *testing.T) {
+	if StatusForSeats(0) != StatusInactive || StatusForSeats(2) != StatusActive {
+		t.Fatalf("unexpected status for seat counts")
+	}
+}

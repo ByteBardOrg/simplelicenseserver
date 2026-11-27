@@ -38,33 +38,7 @@ func (s *Store) ListLicenses(ctx context.Context, params LicenseListParams) (Lic
 		return LicenseListResult{}, err
 	}
 
-	rows, err := s.db.Query(ctx, `
-		SELECT l.id,
-		       l.key,
-		       l.status,
-		       l.expires_at,
-		       l.created_at,
-		       l.activated_at,
-		       (
-		           SELECT MAX(a.last_validated_at)
-		           FROM activations a
-		           WHERE a.license_id = l.id
-		       ) AS last_validated_at,
-		       l.revoked_at,
-		       l.metadata,
-		       l.attributes,
-		       s.name,
-		       s.offline_enabled,
-		       s.offline_token_lifetime_seconds,
-		       l.max_activations,
-		       (
-		           SELECT COUNT(*)
-		           FROM activations a
-		           WHERE a.license_id = l.id
-		             AND a.deactivated_at IS NULL
-		       ) AS active_seats
-		FROM licenses l
-		JOIN slugs s ON s.id = l.slug_id
+	rows, err := s.db.Query(ctx, licenseRowSelect+`
 		WHERE ($1 = '' OR l.key ILIKE $1 ESCAPE '\' OR s.name ILIKE $1 ESCAPE '\' OR l.metadata::text ILIKE $1 ESCAPE '\')
 		  AND ($2 = '' OR (
 		      CASE
@@ -100,6 +74,37 @@ func (s *Store) ListLicenses(ctx context.Context, params LicenseListParams) (Lic
 		Counts:   counts,
 	}, nil
 }
+
+// licenseRowSelect loads everything the management API shows for a license.
+const licenseRowSelect = `
+		SELECT l.id,
+		       l.key,
+		       l.status,
+		       l.expires_at,
+		       l.created_at,
+		       l.activated_at,
+		       (
+		           SELECT MAX(a.last_validated_at)
+		           FROM activations a
+		           WHERE a.license_id = l.id
+		       ) AS last_validated_at,
+		       l.revoked_at,
+		       l.metadata,
+		       l.attributes,
+		       s.name,
+		       s.offline_enabled,
+		       s.offline_token_lifetime_seconds,
+		       l.max_activations,
+		       (
+		           SELECT COUNT(*)
+		           FROM activations a
+		           WHERE a.license_id = l.id
+		             AND a.deactivated_at IS NULL
+		       ) AS active_seats,
+		       s.product
+		FROM licenses l
+		JOIN slugs s ON s.id = l.slug_id
+`
 
 func (s *Store) countLicenses(ctx context.Context, searchPattern, status string) (int, error) {
 	var total int
@@ -174,6 +179,7 @@ func scanLicenseListRow(row licenseListScanner) (LicenseRow, error) {
 		&license.OfflineTokenLifetimeSeconds,
 		&license.MaxActivations,
 		&license.ActiveSeats,
+		&license.Product,
 	)
 	if err != nil {
 		return LicenseRow{}, fmt.Errorf("scan license row: %w", err)
