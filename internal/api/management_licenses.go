@@ -1,8 +1,11 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +16,7 @@ type licenseManagementResponse struct {
 	ID                        string         `json:"id"`
 	LicenseKey                string         `json:"license_key"`
 	Slug                      string         `json:"slug"`
+	Product                   *string        `json:"product"`
 	Status                    string         `json:"status"`
 	Metadata                  map[string]any `json:"metadata"`
 	Attributes                map[string]any `json:"attributes"`
@@ -113,6 +117,7 @@ func mapLicenseManagementResponse(record storage.LicenseRow) licenseManagementRe
 		ID:                        record.ID,
 		LicenseKey:                record.Key,
 		Slug:                      record.SlugName,
+		Product:                   optionalString(record.Product),
 		Status:                    displayLicenseStatus(record),
 		Metadata:                  record.Metadata,
 		Attributes:                record.Attributes,
@@ -129,11 +134,16 @@ func mapLicenseManagementResponse(record storage.LicenseRow) licenseManagementRe
 }
 
 func displayLicenseStatus(record storage.LicenseRow) string {
-	if record.Status != "revoked" && record.ExpiresAt != nil && !time.Now().UTC().Before(record.ExpiresAt.UTC()) {
+	return displayStatus(record.Status, record.ExpiresAt)
+}
+
+// displayStatus adds the derived "expired" status; the database only stores inactive, active and revoked.
+func displayStatus(status string, expiresAt *time.Time) string {
+	if status != "revoked" && expiresAt != nil && !time.Now().UTC().Before(expiresAt.UTC()) {
 		return "expired"
 	}
 
-	return record.Status
+	return status
 }
 
 func validateLicenseListStatus(status string) error {
@@ -151,4 +161,178 @@ func totalPages(total, pageSize int) int {
 	}
 
 	return (total + pageSize - 1) / pageSize
+}
+
+type activationManagementResponse struct {
+	ID              int64          `json:"id"`
+	Fingerprint     string         `json:"fingerprint"`
+	Metadata        map[string]any `json:"metadata"`
+	ActivatedAt     time.Time      `json:"activated_at"`
+	LastValidatedAt *time.Time     `json:"last_validated_at"`
+}
+
+type licenseDetailResponse struct {
+	licenseManagementResponse
+	Activations []activationManagementResponse `json:"activations"`
+}
+
+// updateLicenseRequest uses a raw message for expires_at so that `null` (never expires)
+// can be told apart from the field being left out (no change).
+type updateLicenseRequest struct {
+	MaxActivations *int            `json:"max_activations"`
+	ExpiresAt      json.RawMessage `json:"expires_at"`
+	Revoked        *bool           `json:"revoked"`
+}
+
+func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
+	licenseID, ok := licenseIDFromPath(w, r)
+	if !ok {
+		return
+	}
+
+	detail, err := s.service.GetLicense(r.Context(), licenseID)
+	if err != nil {
+		s.writeLicenseLookupError(w, err, "failed to get license")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, mapLicenseDetailResponse(detail))
+}
+
+func (s *Server) handleUpdateLicense(w http.ResponseWriter, r *http.Request) {
+	licenseID, ok := licenseIDFromPath(w, r)
+	if !ok {
+		return
+	}
+
+	var req updateLicenseRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	params := storage.UpdateLicenseParams{MaxActivations: req.MaxActivations, Revoked: req.Revoked}
+	if len(req.ExpiresAt) > 0 {
+		params.SetExpiresAt = true
+		if string(req.ExpiresAt) != "null" {
+			var raw string
+			if err := json.Unmarshal(req.ExpiresAt, &raw); err != nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "expires_at must be an RFC3339 timestamp or null"})
+				return
+			}
+			parsed, err := parseOptionalRFC3339(raw)
+			if err != nil || parsed == nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "expires_at must be an RFC3339 timestamp or null"})
+				return
+			}
+			params.ExpiresAt = parsed
+		}
+	}
+
+	if params.MaxActivations == nil && !params.SetExpiresAt && params.Revoked == nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "at least one of max_activations, expires_at or revoked is required"})
+		return
+	}
+	if params.MaxActivations != nil && *params.MaxActivations <= 0 {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "max_activations must be greater than 0"})
+		return
+	}
+
+	updated, err := s.service.UpdateLicense(r.Context(), licenseID, params)
+	if err != nil {
+		s.writeLicenseLookupError(w, err, "failed to update license")
+		return
+	}
+
+	license := updated.Detail.License
+	payload := map[string]any{
+		"license_key":     license.Key,
+		"status":          displayLicenseStatus(license),
+		"max_activations": license.MaxActivations,
+		"expires_at":      license.ExpiresAt,
+		"revoked_at":      license.RevokedAt,
+	}
+	if updated.NewlyRevoked {
+		s.emitWebhookEvent(r.Context(), webhookEventLicenseRevoked, payload)
+	} else {
+		s.emitWebhookEvent(r.Context(), webhookEventLicenseUpdated, payload)
+	}
+
+	writeJSON(w, http.StatusOK, mapLicenseDetailResponse(updated.Detail))
+}
+
+func (s *Server) handleRemoveActivation(w http.ResponseWriter, r *http.Request) {
+	licenseID, ok := licenseIDFromPath(w, r)
+	if !ok {
+		return
+	}
+
+	activationID, err := parsePathID(r.PathValue("activationID"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	removed, err := s.service.RemoveActivation(r.Context(), licenseID, activationID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "license or activation not found"})
+			return
+		}
+		s.writeUnexpectedError(w, "failed to remove activation", err)
+		return
+	}
+
+	license := removed.Detail.License
+	s.emitWebhookEvent(r.Context(), webhookEventLicenseDeactivated, map[string]any{
+		"license_key":     license.Key,
+		"fingerprint":     removed.Fingerprint,
+		"reason":          storage.AdminRemovedReason,
+		"released":        true,
+		"status":          displayLicenseStatus(license),
+		"active_seats":    license.ActiveSeats,
+		"max_activations": license.MaxActivations,
+		"expires_at":      license.ExpiresAt,
+	})
+
+	writeJSON(w, http.StatusOK, mapLicenseDetailResponse(removed.Detail))
+}
+
+var licenseIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// licenseIDFromPath reads the license ID (a UUID) from admin URLs. Admin routes never take the
+// license key, so keys don't end up in access logs.
+func licenseIDFromPath(w http.ResponseWriter, r *http.Request) (string, bool) {
+	licenseID := strings.TrimSpace(r.PathValue("id"))
+	if !licenseIDPattern.MatchString(licenseID) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "license id must be a UUID (the id field of a license, not its key)"})
+		return "", false
+	}
+	return strings.ToLower(licenseID), true
+}
+
+func (s *Server) writeLicenseLookupError(w http.ResponseWriter, err error, message string) {
+	if errors.Is(err, storage.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "license not found"})
+		return
+	}
+	s.writeUnexpectedError(w, message, err)
+}
+
+func mapLicenseDetailResponse(detail storage.LicenseDetail) licenseDetailResponse {
+	activations := make([]activationManagementResponse, 0, len(detail.Activations))
+	for _, activation := range detail.Activations {
+		activations = append(activations, activationManagementResponse{
+			ID:              activation.ID,
+			Fingerprint:     activation.Fingerprint,
+			Metadata:        activation.Metadata,
+			ActivatedAt:     activation.CreatedAt,
+			LastValidatedAt: activation.LastValidatedAt,
+		})
+	}
+
+	return licenseDetailResponse{
+		licenseManagementResponse: mapLicenseManagementResponse(detail.License),
+		Activations:               activations,
+	}
 }

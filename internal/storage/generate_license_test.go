@@ -117,7 +117,8 @@ func TestGenerateLicenseWithQuerierSnapshotsDurationSlugPolicy(t *testing.T) {
 					t.Fatalf("expected max_activations 7, got %v (%T)", args[5], args[5])
 				}
 
-				*dest[0].(*time.Time) = createdAt
+				*dest[0].(*string) = "2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01"
+				*dest[1].(*time.Time) = createdAt
 				return nil
 			}}
 		default:
@@ -147,6 +148,9 @@ func TestGenerateLicenseWithQuerierSnapshotsDurationSlugPolicy(t *testing.T) {
 		t.Fatalf("expected generated license expiration")
 	}
 
+	if generated.ID != "2f4d7c2c-9e2f-4d7e-932c-b2e5c1d92f01" {
+		t.Fatalf("expected generated license id, got %q", generated.ID)
+	}
 	if !generated.CreatedAt.Equal(createdAt) {
 		t.Fatalf("expected created_at %s, got %s", createdAt, generated.CreatedAt)
 	}

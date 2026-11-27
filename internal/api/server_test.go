@@ -49,6 +49,38 @@ type stubService struct {
 	createSigningKeyFn         func(ctx context.Context, params storage.CreateSigningKeyParams) (storage.SigningKeyRecord, error)
 	activateSigningKeyFn       func(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
 	retireSigningKeyFn         func(ctx context.Context, id int64) (storage.SigningKeyRecord, error)
+	getLicenseFn               func(ctx context.Context, licenseKey string) (storage.LicenseDetail, error)
+	updateLicenseFn            func(ctx context.Context, licenseKey string, params storage.UpdateLicenseParams) (storage.UpdatedLicense, error)
+	removeActivationFn         func(ctx context.Context, licenseKey string, activationID int64) (storage.RemovedActivation, error)
+	rotateWebhookSecretFn      func(ctx context.Context, id int64) (string, error)
+}
+
+func (s stubService) RotateWebhookSecret(ctx context.Context, id int64) (string, error) {
+	if s.rotateWebhookSecretFn != nil {
+		return s.rotateWebhookSecretFn(ctx, id)
+	}
+	return "", storage.ErrNotFound
+}
+
+func (s stubService) GetLicense(ctx context.Context, licenseKey string) (storage.LicenseDetail, error) {
+	if s.getLicenseFn != nil {
+		return s.getLicenseFn(ctx, licenseKey)
+	}
+	return storage.LicenseDetail{}, storage.ErrNotFound
+}
+
+func (s stubService) UpdateLicense(ctx context.Context, licenseKey string, params storage.UpdateLicenseParams) (storage.UpdatedLicense, error) {
+	if s.updateLicenseFn != nil {
+		return s.updateLicenseFn(ctx, licenseKey, params)
+	}
+	return storage.UpdatedLicense{}, storage.ErrNotFound
+}
+
+func (s stubService) RemoveActivation(ctx context.Context, licenseKey string, activationID int64) (storage.RemovedActivation, error) {
+	if s.removeActivationFn != nil {
+		return s.removeActivationFn(ctx, licenseKey, activationID)
+	}
+	return storage.RemovedActivation{}, storage.ErrNotFound
 }
 
 func (s stubService) EnqueueWebhookEvent(ctx context.Context, eventType string, payload map[string]any) error {
@@ -258,7 +290,7 @@ func (s stubService) RetireSigningKey(ctx context.Context, id int64) (storage.Si
 func TestGenerateRequiresServerKey(t *testing.T) {
 	s := NewServer(stubService{}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"server_key_dev_123": {}}, 15*time.Second)
 
-	req := httptest.NewRequest(http.MethodPost, "/generate", strings.NewReader(`{"slug":"default"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/generate", strings.NewReader(`{"slug":"default"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -295,7 +327,7 @@ func TestGenerateWithBearerKey(t *testing.T) {
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"server_key_dev_123": {}}, 15*time.Second)
 
 	body := `{"slug":"default","metadata":{"email":"user@example.com"}}`
-	req := httptest.NewRequest(http.MethodPost, "/generate", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/generate", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer server_key_dev_123")
 	rr := httptest.NewRecorder()
@@ -334,7 +366,7 @@ func TestGenerateAcceptsManagementKeyForProvisioning(t *testing.T) {
 		},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
 
-	req := httptest.NewRequest(http.MethodPost, "/generate", strings.NewReader(`{"slug":"default","metadata":{"email":"user@example.com"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/generate", strings.NewReader(`{"slug":"default","metadata":{"email":"user@example.com"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer management_key_dev_123456")
 	rr := httptest.NewRecorder()
@@ -367,7 +399,7 @@ func TestRevokeAcceptsManagementKeyForProvisioning(t *testing.T) {
 		},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, 15*time.Second)
 
-	req := httptest.NewRequest(http.MethodPost, "/revoke", strings.NewReader(`{"license_key":"LNC-8821-X99B-4421"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/revoke", strings.NewReader(`{"license_key":"LNC-8821-X99B-4421"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer management_key_dev_123456")
 	rr := httptest.NewRecorder()
@@ -400,6 +432,7 @@ func TestValidateRefreshesOfflineTokenWhenSlugAllowsOffline(t *testing.T) {
 				Status:                      "active",
 				LicenseID:                   "8c50f4f7-761d-4bf1-8e09-27a5f7ea0a12",
 				Slug:                        "default",
+				Product:                     "desktop-app",
 				Attributes:                  map[string]any{"features": []any{"analytics"}, "tier": "pro"},
 				OfflineEnabled:              true,
 				OfflineTokenLifetimeSeconds: 86400,
@@ -421,7 +454,7 @@ func TestValidateRefreshesOfflineTokenWhenSlugAllowsOffline(t *testing.T) {
 		OfflineTokenIssuer: "test-issuer",
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/validate", strings.NewReader(`{"license_key":"LNC-8821-X99B-4421","fingerprint":"device-1"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/validate", strings.NewReader(`{"license_key":"LNC-8821-X99B-4421","fingerprint":"device-1"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -431,7 +464,7 @@ func TestValidateRefreshesOfflineTokenWhenSlugAllowsOffline(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	var response validateResponse
+	var response publicLicenseResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -459,6 +492,9 @@ func TestValidateRefreshesOfflineTokenWhenSlugAllowsOffline(t *testing.T) {
 	}
 	if attributes["tier"] != "pro" {
 		t.Fatalf("expected tier=pro in attributes, got %v", attributes)
+	}
+	if claims["aud"] != "desktop-app" {
+		t.Fatalf("expected aud to be the slug product, got %v", claims["aud"])
 	}
 }
 
@@ -698,7 +734,6 @@ func TestRateLimitMiddlewareReturns429(t *testing.T) {
 			RateLimitPerIPBurst:   1,
 			RateLimitIPTTL:        time.Minute,
 			RateLimitMaxIPEntries: 10,
-			TrustProxyHeaders:     false,
 		},
 	)
 
@@ -778,5 +813,252 @@ func TestUIRoutesServeIndexWhenEnabled(t *testing.T) {
 
 	if !strings.Contains(rr.Body.String(), "ui ok") {
 		t.Fatalf("expected UI index content, got: %s", rr.Body.String())
+	}
+}
+
+func newTestServer(service stubService) http.Handler {
+	return NewServerWithOptions(service, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, Options{
+		RequestTimeout:   15 * time.Second,
+		RateLimitEnabled: false,
+	}).Routes()
+}
+
+func TestPublicValidateResponseShape(t *testing.T) {
+	expiresAt := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)
+	handler := newTestServer(stubService{
+		validateLicenseFn: func(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error) {
+			return storage.ValidationResult{
+				Valid:          true,
+				Status:         "active",
+				Product:        "desktop-app",
+				Attributes:     map[string]any{"tier": "pro"},
+				ExpiresAt:      &expiresAt,
+				ActiveSeats:    2,
+				MaxActivations: 3,
+			}, nil
+		},
+	})
+
+	rr := doJSONRequest(t, handler, http.MethodPost, "/api/v1/validate", map[string]string{"license_key": "K", "fingerprint": "fp"}, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	want := `{"valid":true,"reason":null,"license":{"product":"desktop-app","status":"active","expires_at":"2027-01-02T03:04:05Z","seats":{"used":2,"max":3},"attributes":{"tier":"pro"}}}`
+	if got := strings.TrimSpace(rr.Body.String()); got != want {
+		t.Fatalf("unexpected body\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestPublicEndpointsReturnNotFoundAsInvalid(t *testing.T) {
+	handler := newTestServer(stubService{
+		activateLicenseFn: func(ctx context.Context, licenseKey, fingerprint string, metadata map[string]any) (storage.ActivationResult, error) {
+			return storage.ActivationResult{}, storage.ErrNotFound
+		},
+		validateLicenseFn: func(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error) {
+			return storage.ValidationResult{}, storage.ErrNotFound
+		},
+		deactivateLicenseFn: func(ctx context.Context, licenseKey, fingerprint, reason string) (storage.DeactivationResult, error) {
+			return storage.DeactivationResult{}, storage.ErrNotFound
+		},
+	})
+
+	for _, endpoint := range []string{"activate", "validate", "deactivate"} {
+		rr := doJSONRequest(t, handler, http.MethodPost, "/api/v1/"+endpoint, map[string]string{"license_key": "K", "fingerprint": "fp"}, nil)
+		want := `{"valid":false,"reason":"not_found","license":null}`
+		if rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != want {
+			t.Fatalf("%s: expected 200 %s, got %d %s", endpoint, want, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestOldRootRuntimeRoutesAreGone(t *testing.T) {
+	handler := newTestServer(stubService{})
+	for _, path := range []string{"/generate", "/revoke", "/activate", "/validate", "/deactivate"} {
+		rr := doJSONRequest(t, handler, http.MethodPost, path, map[string]string{"license_key": "K"}, nil)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("%s: expected 404, got %d", path, rr.Code)
+		}
+	}
+}
+
+func TestUpdateLicenseValidation(t *testing.T) {
+	handler := newTestServer(stubService{
+		updateLicenseFn: func(ctx context.Context, licenseKey string, params storage.UpdateLicenseParams) (storage.UpdatedLicense, error) {
+			t.Fatalf("store must not be called for invalid input")
+			return storage.UpdatedLicense{}, nil
+		},
+	})
+	headers := map[string]string{"Authorization": "Bearer management_key_dev_123456"}
+
+	for name, body := range map[string]map[string]any{
+		"empty":              {},
+		"zero seats":         {"max_activations": 0},
+		"bad expires_at":     {"expires_at": "next tuesday"},
+		"numeric expires_at": {"expires_at": 12},
+	} {
+		rr := doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/"+testLicenseID, body, headers)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d body=%s", name, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestUpdateLicenseParamsAndWebhookEvent(t *testing.T) {
+	var gotParams storage.UpdateLicenseParams
+	var events []string
+	newlyRevoked := false
+
+	handler := newTestServer(stubService{
+		updateLicenseFn: func(ctx context.Context, licenseKey string, params storage.UpdateLicenseParams) (storage.UpdatedLicense, error) {
+			gotParams = params
+			return storage.UpdatedLicense{
+				Detail:       storage.LicenseDetail{License: storage.LicenseRow{Key: licenseKey, Status: "inactive", MaxActivations: 1}},
+				NewlyRevoked: newlyRevoked,
+			}, nil
+		},
+		enqueueWebhookEventFn: func(ctx context.Context, eventType string, payload map[string]any) error {
+			events = append(events, eventType)
+			return nil
+		},
+	})
+	headers := map[string]string{"Authorization": "Bearer management_key_dev_123456"}
+
+	rr := doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/"+testLicenseID, map[string]any{"expires_at": nil}, headers)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !gotParams.SetExpiresAt || gotParams.ExpiresAt != nil || gotParams.MaxActivations != nil || gotParams.Revoked != nil {
+		t.Fatalf("null expires_at should clear expiry and touch nothing else, got %+v", gotParams)
+	}
+
+	rr = doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/"+testLicenseID, map[string]any{"expires_at": "2027-05-01T00:00:00Z", "max_activations": 4}, headers)
+	if rr.Code != http.StatusOK || gotParams.ExpiresAt == nil || !gotParams.ExpiresAt.Equal(time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)) || *gotParams.MaxActivations != 4 {
+		t.Fatalf("unexpected params %+v (status %d)", gotParams, rr.Code)
+	}
+
+	newlyRevoked = true
+	doJSONRequest(t, handler, http.MethodPatch, "/management/licenses/"+testLicenseID, map[string]any{"revoked": true}, headers)
+
+	want := []string{webhookEventLicenseUpdated, webhookEventLicenseUpdated, webhookEventLicenseRevoked}
+	if strings.Join(events, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected events %v, got %v", want, events)
+	}
+}
+
+func TestRemoveActivationNotFound(t *testing.T) {
+	handler := newTestServer(stubService{})
+	rr := doJSONRequest(t, handler, http.MethodDelete, "/management/licenses/"+testLicenseID+"/activations/9", nil, map[string]string{"Authorization": "Bearer management_key_dev_123456"})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestOfflineTokenAudienceFallsBackToServerSetting(t *testing.T) {
+	secret := "test_offline_signing_secret_32_chars"
+	keyPair, err := offlinejwt.GenerateEd25519KeyPair()
+	if err != nil {
+		t.Fatalf("generate key pair: %v", err)
+	}
+	encryptedPrivateKey, err := offlinejwt.EncryptPrivateKey(keyPair.PrivatePEM, secret)
+	if err != nil {
+		t.Fatalf("encrypt private key: %v", err)
+	}
+
+	handler := NewServerWithOptions(stubService{
+		validateLicenseFn: func(ctx context.Context, licenseKey, fingerprint string) (storage.ValidationResult, error) {
+			return storage.ValidationResult{
+				Valid:                       true,
+				Status:                      "active",
+				LicenseID:                   "8c50f4f7-761d-4bf1-8e09-27a5f7ea0a12",
+				Slug:                        "default",
+				OfflineEnabled:              true,
+				OfflineTokenLifetimeSeconds: 3600,
+			}, nil
+		},
+		getActiveSigningKeyFn: func(ctx context.Context) (storage.SigningKeyRecord, error) {
+			return storage.SigningKeyRecord{Kid: keyPair.Kid, Algorithm: keyPair.Algorithm, Status: "active", PrivateKeyEncrypted: encryptedPrivateKey, PublicKeyPEM: keyPair.PublicPEM}, nil
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{}, Options{
+		RequestTimeout:       15 * time.Second,
+		OfflineSigningKey:    secret,
+		OfflineTokenIssuer:   "test-issuer",
+		OfflineTokenAudience: "server-wide-audience",
+	}).Routes()
+
+	rr := doJSONRequest(t, handler, http.MethodPost, "/api/v1/validate", map[string]string{"license_key": "K", "fingerprint": "fp"}, nil)
+	response := decodeJSONResponse[publicLicenseResponse](t, rr)
+	if response.License == nil || response.License.Product != nil {
+		t.Fatalf("expected product null for a slug without one, got %s", rr.Body.String())
+	}
+	parts := strings.Split(response.Token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected a JWT, got %q", response.Token)
+	}
+	claimsJSON, _ := base64.RawURLEncoding.DecodeString(parts[1])
+	var claims map[string]any
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		t.Fatalf("unmarshal claims: %v", err)
+	}
+	if claims["aud"] != "server-wide-audience" {
+		t.Fatalf("expected fallback aud, got %v", claims["aud"])
+	}
+}
+
+func TestCreateSlugProduct(t *testing.T) {
+	var got storage.CreateSlugParams
+	handler := newTestServer(stubService{
+		createSlugFn: func(ctx context.Context, params storage.CreateSlugParams) (storage.SlugRecord, error) {
+			got = params
+			return storage.SlugRecord{Name: params.Name, MaxActivations: 1, ExpirationType: "forever", Product: params.Product}, nil
+		},
+	})
+	headers := map[string]string{"Authorization": "Bearer management_key_dev_123456"}
+
+	rr := doJSONRequest(t, handler, http.MethodPost, "/management/slugs", map[string]any{
+		"name": "pro", "max_activations": 1, "expiration_type": "forever", "product": "  desktop-app  ",
+	}, headers)
+	if rr.Code != http.StatusCreated || got.Product != "desktop-app" || !strings.Contains(rr.Body.String(), `"product":"desktop-app"`) {
+		t.Fatalf("expected trimmed product to be stored and returned, got %d %s (params %+v)", rr.Code, rr.Body.String(), got)
+	}
+
+	rr = doJSONRequest(t, handler, http.MethodPost, "/management/slugs", map[string]any{
+		"name": "bad", "max_activations": 1, "expiration_type": "forever", "product": "line\nbreak",
+	}, headers)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for control characters, got %d", rr.Code)
+	}
+}
+
+const testLicenseID = "8c50f4f7-761d-4bf1-8e09-27a5f7ea0a12"
+
+func TestAdminLicenseRoutesRejectLicenseKeys(t *testing.T) {
+	handler := newTestServer(stubService{})
+	headers := map[string]string{"Authorization": "Bearer management_key_dev_123456"}
+	rr := doJSONRequest(t, handler, http.MethodGet, "/management/licenses/7DB30B-513888-B44E35-593E3E-1F5927", nil, headers)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "UUID") {
+		t.Fatalf("expected 400 asking for the license id, got %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestManagementKeyVerificationIsCached(t *testing.T) {
+	s := NewServerWithOptions(stubService{}, slog.New(slog.NewTextHandler(io.Discard, nil)), map[string]struct{}{"management_key_dev_123456": {}}, Options{RequestTimeout: 15 * time.Second})
+
+	start := time.Now()
+	if !s.isAuthorizedManagementKey("management_key_dev_123456") {
+		t.Fatalf("expected key to verify")
+	}
+	first := time.Since(start)
+
+	start = time.Now()
+	if !s.isAuthorizedManagementKey("management_key_dev_123456") {
+		t.Fatalf("expected key to verify again")
+	}
+	if second := time.Since(start); second > first/10 {
+		t.Fatalf("expected cached check to be much faster: first %s, second %s", first, second)
+	}
+
+	if s.isAuthorizedManagementKey("management_key_dev_123457") {
+		t.Fatalf("a different key must not verify")
 	}
 }

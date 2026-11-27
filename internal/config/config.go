@@ -9,47 +9,61 @@ import (
 )
 
 type Config struct {
-	Port                  string
-	DatabaseURL           string
-	ManagementAPIKeys     map[string]struct{}
-	UIEnabled             bool
-	RequestTimeout        time.Duration
-	ShutdownTimeout       time.Duration
-	ReadTimeout           time.Duration
-	WriteTimeout          time.Duration
-	IdleTimeout           time.Duration
-	RateLimitEnabled      bool
-	RateLimitGlobalRPS    float64
-	RateLimitGlobalBurst  int
-	RateLimitPerIPRPS     float64
-	RateLimitPerIPBurst   int
-	RateLimitIPTTL        time.Duration
-	RateLimitMaxIPEntries int
-	TrustProxyHeaders     bool
-	OfflineSigningKey     string
-	OfflineTokenIssuer    string
-	OfflineTokenAudience  string
+	Port                   string
+	DatabaseURL            string
+	ManagementAPIKeys      map[string]struct{}
+	UIEnabled              bool
+	RequestTimeout         time.Duration
+	ShutdownTimeout        time.Duration
+	ReadTimeout            time.Duration
+	WriteTimeout           time.Duration
+	IdleTimeout            time.Duration
+	RateLimitEnabled       bool
+	RateLimitGlobalRPS     float64
+	RateLimitGlobalBurst   int
+	RateLimitPerIPRPS      float64
+	RateLimitPerIPBurst    int
+	RateLimitIPTTL         time.Duration
+	RateLimitMaxIPEntries  int
+	ClientIPHeader         string
+	AuthFailureMaxAttempts int
+	AuthFailureWindow      time.Duration
+	OfflineSigningKey      string
+	OfflineTokenIssuer     string
+	OfflineTokenAudience   string
+	AllowExampleSecrets    bool
+}
+
+// publishedSecrets are values that appear in this project's docs and examples. Anyone can read them,
+// so the server refuses to run with them unless ALLOW_EXAMPLE_SECRETS=true (local development only).
+var publishedSecrets = map[string]struct{}{
+	"management_key_dev_123456":                               {},
+	"management_key_prod_please_make_this_long_and_random":    {},
+	"development_offline_signing_key_123456":                  {},
+	"change_me_to_at_least_32_chars_long":                     {},
+	"replace_with_32_plus_chars_before_creating_signing_keys": {},
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Port:                  strings.TrimSpace(getEnv("PORT", "8080")),
-		DatabaseURL:           strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		UIEnabled:             false,
-		RequestTimeout:        15 * time.Second,
-		ShutdownTimeout:       10 * time.Second,
-		ReadTimeout:           15 * time.Second,
-		WriteTimeout:          30 * time.Second,
-		IdleTimeout:           60 * time.Second,
-		RateLimitEnabled:      true,
-		RateLimitGlobalRPS:    100,
-		RateLimitGlobalBurst:  200,
-		RateLimitPerIPRPS:     20,
-		RateLimitPerIPBurst:   40,
-		RateLimitIPTTL:        10 * time.Minute,
-		RateLimitMaxIPEntries: 10000,
-		TrustProxyHeaders:     false,
-		OfflineTokenIssuer:    "simple-license-server",
+		Port:                   strings.TrimSpace(getEnv("PORT", "8080")),
+		DatabaseURL:            strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		UIEnabled:              false,
+		RequestTimeout:         15 * time.Second,
+		ShutdownTimeout:        10 * time.Second,
+		ReadTimeout:            15 * time.Second,
+		WriteTimeout:           30 * time.Second,
+		IdleTimeout:            60 * time.Second,
+		RateLimitEnabled:       true,
+		RateLimitGlobalRPS:     0,
+		RateLimitGlobalBurst:   0,
+		RateLimitPerIPRPS:      20,
+		RateLimitPerIPBurst:    40,
+		RateLimitIPTTL:         10 * time.Minute,
+		RateLimitMaxIPEntries:  10000,
+		AuthFailureMaxAttempts: 10,
+		AuthFailureWindow:      15 * time.Minute,
+		OfflineTokenIssuer:     "simple-license-server",
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -158,9 +172,31 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	cfg.TrustProxyHeaders, err = parseBoolEnv("TRUST_PROXY_HEADERS", cfg.TrustProxyHeaders)
+	// TRUST_PROXY_HEADERS trusted the leftmost X-Forwarded-For entry, which clients control. Refuse to
+	// start rather than silently changing which address is rate limited.
+	if legacy, _ := parseBoolEnv("TRUST_PROXY_HEADERS", false); legacy {
+		return Config{}, fmt.Errorf("TRUST_PROXY_HEADERS was removed in 0.5.0: set CLIENT_IP_HEADER instead (for example CF-Connecting-IP behind Cloudflare, or X-Forwarded-For behind a single reverse proxy)")
+	}
+
+	cfg.ClientIPHeader = strings.TrimSpace(os.Getenv("CLIENT_IP_HEADER"))
+	if err := validateHeaderName(cfg.ClientIPHeader); err != nil {
+		return Config{}, err
+	}
+
+	cfg.AuthFailureMaxAttempts, err = parseIntEnv("AUTH_FAILURE_MAX_ATTEMPTS", cfg.AuthFailureMaxAttempts)
 	if err != nil {
 		return Config{}, err
+	}
+	if cfg.AuthFailureMaxAttempts < 0 {
+		return Config{}, fmt.Errorf("AUTH_FAILURE_MAX_ATTEMPTS must be 0 (disabled) or greater")
+	}
+
+	cfg.AuthFailureWindow, err = parseDurationEnv("AUTH_FAILURE_WINDOW", cfg.AuthFailureWindow)
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.AuthFailureMaxAttempts > 0 && cfg.AuthFailureWindow <= 0 {
+		return Config{}, fmt.Errorf("AUTH_FAILURE_WINDOW must be greater than 0")
 	}
 
 	cfg.UIEnabled, err = parseBoolEnv("UI_ENABLED", cfg.UIEnabled)
@@ -172,13 +208,27 @@ func Load() (Config, error) {
 	cfg.OfflineTokenIssuer = strings.TrimSpace(getEnv("OFFLINE_TOKEN_ISSUER", cfg.OfflineTokenIssuer))
 	cfg.OfflineTokenAudience = strings.TrimSpace(os.Getenv("OFFLINE_TOKEN_AUDIENCE"))
 
+	cfg.AllowExampleSecrets, err = parseBoolEnv("ALLOW_EXAMPLE_SECRETS", false)
+	if err != nil {
+		return Config{}, err
+	}
+	if !cfg.AllowExampleSecrets {
+		if err := rejectPublishedSecrets(cfg); err != nil {
+			return Config{}, err
+		}
+	}
+
 	if cfg.RateLimitEnabled {
-		if cfg.RateLimitGlobalRPS <= 0 || cfg.RateLimitPerIPRPS <= 0 {
-			return Config{}, fmt.Errorf("RATE_LIMIT_*_RPS values must be greater than 0")
+		if cfg.RateLimitPerIPRPS <= 0 || cfg.RateLimitPerIPBurst <= 0 {
+			return Config{}, fmt.Errorf("RATE_LIMIT_PER_IP_RPS and RATE_LIMIT_PER_IP_BURST must be greater than 0")
 		}
 
-		if cfg.RateLimitGlobalBurst <= 0 || cfg.RateLimitPerIPBurst <= 0 {
-			return Config{}, fmt.Errorf("RATE_LIMIT_*_BURST values must be greater than 0")
+		if cfg.RateLimitGlobalRPS < 0 {
+			return Config{}, fmt.Errorf("RATE_LIMIT_GLOBAL_RPS must be 0 (disabled) or greater")
+		}
+
+		if cfg.RateLimitGlobalRPS > 0 && cfg.RateLimitGlobalBurst <= 0 {
+			return Config{}, fmt.Errorf("RATE_LIMIT_GLOBAL_BURST must be greater than 0 when RATE_LIMIT_GLOBAL_RPS is set")
 		}
 
 		if cfg.RateLimitIPTTL <= 0 {
@@ -191,6 +241,29 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func rejectPublishedSecrets(cfg Config) error {
+	const howTo = "generate your own with `openssl rand -hex 32` (ALLOW_EXAMPLE_SECRETS=true permits example values for local development only)"
+	for key := range cfg.ManagementAPIKeys {
+		if _, published := publishedSecrets[key]; published {
+			return fmt.Errorf("MANAGEMENT_API_KEYS contains an example key from the public docs: %s", howTo)
+		}
+	}
+	if _, published := publishedSecrets[cfg.OfflineSigningKey]; published {
+		return fmt.Errorf("OFFLINE_SIGNING_ENCRYPTION_KEY is an example value from the public docs: %s", howTo)
+	}
+	return nil
+}
+
+// validateHeaderName accepts an empty name or an HTTP header token such as CF-Connecting-IP.
+func validateHeaderName(name string) error {
+	for _, r := range name {
+		if !(r == '-' || r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+			return fmt.Errorf("CLIENT_IP_HEADER must be a header name such as CF-Connecting-IP, got %q", name)
+		}
+	}
+	return nil
 }
 
 func getEnv(name, fallback string) string {

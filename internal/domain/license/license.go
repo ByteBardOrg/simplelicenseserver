@@ -194,6 +194,25 @@ func (l *License) Deactivate(activeSeatsAfter int) DeactivationResult {
 	}
 }
 
+// Standing reports whether the license itself is usable right now, independent of any device.
+func (l *License) Standing(now time.Time) (bool, Reason) {
+	if l.status == StatusRevoked {
+		return false, ReasonRevoked
+	}
+	if l.isExpired(now) {
+		return false, ReasonExpired
+	}
+	return true, ReasonNone
+}
+
+// StatusForSeats is the status of a non-revoked license with the given number of active seats.
+func StatusForSeats(activeSeats int) Status {
+	if activeSeats > 0 {
+		return StatusActive
+	}
+	return StatusInactive
+}
+
 func (l *License) isExpired(now time.Time) bool {
 	if l.expiresAt == nil {
 		return false

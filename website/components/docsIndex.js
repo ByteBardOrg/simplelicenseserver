@@ -1,0 +1,317 @@
+export const docsIndex = [
+  {
+    href: "/docs/",
+    title: "Overview",
+    summary: "Architecture, navigation, and docs map.",
+    icon: "bx-home-alt-2",
+    keywords: ["overview", "documentation", "intro", "architecture"]
+  },
+  {
+    href: "/docs/quickstart/",
+    title: "Quickstart",
+    summary: "Run the server, verify health, and generate your first key.",
+    icon: "bx-rocket",
+    keywords: ["docker", "compose", "setup", "install"]
+  },
+  {
+    href: "/docs/authentication/",
+    title: "Authentication",
+    summary: "Understand management keys vs generated server API keys.",
+    icon: "bx-lock-alt",
+    keywords: ["authentication", "bearer", "api key", "management", "authorization"]
+  },
+  {
+    href: "/docs/concepts/",
+    title: "Concepts",
+    summary: "Understand slugs, seats, activation flow, and license lifecycle behavior.",
+    icon: "bx-bulb",
+    keywords: ["concepts", "slug", "seats", "licenses", "activation", "lifecycle"]
+  },
+  {
+    href: "/docs/concepts/webhooks/",
+    title: "Webhook Concepts",
+    summary: "Delivery model, idempotency headers, and webhook payload contracts.",
+    icon: "bx-broadcast",
+    keywords: ["webhooks", "idempotency", "payload", "events", "concepts"]
+  },
+  {
+    href: "/docs/concepts/offline-licenses/",
+    title: "Offline License Concepts",
+    summary: "Per-slug offline JWTs, attributes claims, signing keys, token refresh, and public key export.",
+    icon: "bx-shield-quarter",
+    keywords: ["offline", "jwt", "attributes", "signing keys", "ed25519", "public keys", "concepts"]
+  },
+  {
+    href: "/docs/concepts/slugs/",
+    title: "Slug Concepts",
+    summary: "Slug naming rules, attributes, policy fields, and license snapshot behavior at generation time.",
+    icon: "bx-label",
+    keywords: ["slug", "attributes", "policies", "max activations", "expiration", "concepts"]
+  },
+  {
+    href: "/docs/concepts/management-ui/",
+    title: "Management UI Concepts",
+    summary: "Enable and access the bundled operator console at /ui/.",
+    icon: "bx-window-alt",
+    keywords: ["management ui", "ui", "console", "dashboard", "/ui", "/ui/", "operator", "UI_ENABLED"]
+  },
+  {
+    href: "/docs/configuration/",
+    title: "Configuration",
+    summary: "All environment variables, defaults, and validation behavior.",
+    icon: "bx-slider-alt",
+    keywords: ["configuration", "env", "variables", "defaults", "options", "settings"]
+  },
+  {
+    href: "/docs/guides/stripe/",
+    title: "Stripe Example",
+    summary: "Stripe + Vercel webhook example for automatic license generation.",
+    icon: "bx-purchase-tag",
+    keywords: ["stripe", "example", "vercel", "webhook", "checkout", "generate"]
+  },
+  {
+    href: "/docs/api/",
+    title: "License API",
+    summary: "License lifecycle endpoints with request/response examples.",
+    icon: "bx-code-alt",
+    keywords: ["api", "license api", "generate", "activate", "revoke"]
+  },
+  {
+    href: "/docs/management-api/",
+    title: "Management API",
+    summary: "Management endpoints for license listing, slugs, API keys, webhooks, and offline signing keys.",
+    icon: "bx-wrench",
+    keywords: ["management api", "slugs", "api keys", "webhooks", "events", "offline", "signing keys"]
+  },
+  {
+    href: "/docs/api/management-licenses-list/",
+    title: "GET /management/licenses",
+    summary: "List issued licenses with search and pagination.",
+    icon: "bx-list-ul",
+    keywords: ["management api", "licenses", "list", "search"]
+  },
+  {
+    href: "/docs/api/management-slugs-list/",
+    title: "GET /management/slugs",
+    summary: "List slug policy templates.",
+    icon: "bx-list-ul",
+    keywords: ["management api", "slugs", "list"]
+  },
+  {
+    href: "/docs/api/management-slugs-create/",
+    title: "POST /management/slugs",
+    summary: "Create a slug policy template.",
+    icon: "bx-plus-circle",
+    keywords: ["management api", "slugs", "create"]
+  },
+  {
+    href: "/docs/api/management-slugs-get/",
+    title: "GET /management/slugs/{name}",
+    summary: "Get a slug policy template by name.",
+    icon: "bx-search-alt",
+    keywords: ["management api", "slugs", "get"]
+  },
+  {
+    href: "/docs/api/management-slugs-update/",
+    title: "PATCH /management/slugs/{name}",
+    summary: "Update a slug policy template.",
+    icon: "bx-edit",
+    keywords: ["management api", "slugs", "update"]
+  },
+  {
+    href: "/docs/api/management-slugs-delete/",
+    title: "DELETE /management/slugs/{name}",
+    summary: "Archive a slug policy template (soft delete).",
+    icon: "bx-trash",
+    keywords: ["management api", "slugs", "delete"]
+  },
+  {
+    href: "/docs/migration/",
+    title: "Migration",
+    summary: "Upgrade guides across released versions.",
+    icon: "bx-transfer",
+    keywords: ["migration", "upgrade", "version"]
+  },
+  {
+    href: "/docs/migration/0-1-0-to-0-2-0/",
+    title: "0.1.0 -> 0.2.0",
+    summary: "Breaking changes and migration checklist for 0.2.0.",
+    icon: "bx-git-compare",
+    keywords: ["0.2.0", "0.1.0", "migration", "breaking changes"]
+  },
+  {
+    href: "/docs/migration/0-4-0-to-0-5-0/",
+    title: "0.4.0 -> 0.5.0",
+    summary: "Breaking: /api/v1 routes, one runtime response shape, slug products, and license edit/restore/device removal endpoints.",
+    icon: "bx-git-compare",
+    keywords: ["0.5.0", "0.4.0", "migration", "breaking changes", "api/v1", "validate", "not_found", "restore", "seats"]
+  },
+  {
+    href: "/docs/migration/0-3-0-to-0-4-0/",
+    title: "0.3.0 -> 0.4.0",
+    summary: "Slug attributes snapshots, metadata behavior clarifications, and the new UI activation action.",
+    icon: "bx-git-compare",
+    keywords: ["0.4.0", "0.3.0", "migration", "attributes", "metadata", "jwt", "webhooks", "licenses", "activate", "ui"]
+  },
+  {
+    href: "/docs/migration/0-2-0-to-0-3-0/",
+    title: "0.2.0 -> 0.3.0",
+    summary: "Additive upgrade notes for the bundled UI, license registry, and webhook run log.",
+    icon: "bx-git-compare",
+    keywords: ["0.3.0", "0.2.0", "migration", "ui", "webhooks", "licenses"]
+  },
+  {
+    href: "/docs/api/generate/",
+    title: "POST /api/v1/generate",
+    summary: "Generate a license using a generated server API key.",
+    icon: "bx-plus-circle",
+    keywords: ["generate", "license api", "idempotency"]
+  },
+  {
+    href: "/docs/api/revoke/",
+    title: "POST /api/v1/revoke",
+    summary: "Revoke an existing license key.",
+    icon: "bx-block",
+    keywords: ["revoke", "license api"]
+  },
+  {
+    href: "/docs/api/activate/",
+    title: "POST /api/v1/activate",
+    summary: "Activate a license for a fingerprint.",
+    icon: "bx-plug",
+    keywords: ["activate", "license api", "fingerprint"]
+  },
+  {
+    href: "/docs/api/validate/",
+    title: "POST /api/v1/validate",
+    summary: "Validate runtime license state.",
+    icon: "bx-check-shield",
+    keywords: ["validate", "license api", "status"]
+  },
+  {
+    href: "/docs/api/deactivate/",
+    title: "POST /api/v1/deactivate",
+    summary: "Release a seat by deactivating one fingerprint.",
+    icon: "bx-log-out-circle",
+    keywords: ["deactivate", "license api", "seats"]
+  },
+  {
+    href: "/docs/api/management-licenses-get/",
+    title: "GET /management/licenses/{id}",
+    summary: "One license with the devices holding its seats.",
+    icon: "bx-detail",
+    keywords: ["management api", "licenses", "devices", "activations"]
+  },
+  {
+    href: "/docs/api/management-licenses-update/",
+    title: "PATCH /management/licenses/{id}",
+    summary: "Change seats or expiry, or revoke and restore a license.",
+    icon: "bx-edit",
+    keywords: ["management api", "licenses", "renew", "extend", "restore", "seats", "expiry"]
+  },
+  {
+    href: "/docs/api/management-licenses-remove-activation/",
+    title: "DELETE /management/licenses/{id}/activations/{activationID}",
+    summary: "Free a device's seat on a customer's behalf.",
+    icon: "bx-unlink",
+    keywords: ["management api", "devices", "seats", "deactivate", "transfer"]
+  },
+  {
+    href: "/docs/api/management-webhooks-rotate-secret/",
+    title: "POST /management/webhooks/{id}/rotate-secret",
+    summary: "Replace a webhook endpoint's signing secret.",
+    icon: "bx-key",
+    keywords: ["management api", "webhooks", "signature", "secret", "hmac", "rotate"]
+  },
+  {
+    href: "/docs/api/management-api-keys-list/",
+    title: "GET /management/api-keys",
+    summary: "List generated API keys for provisioning.",
+    icon: "bx-list-ul",
+    keywords: ["management api", "api keys", "list"]
+  },
+  {
+    href: "/docs/api/management-api-keys-create/",
+    title: "POST /management/api-keys",
+    summary: "Create a generated server API key.",
+    icon: "bx-key",
+    keywords: ["management api", "api keys", "create"]
+  },
+  {
+    href: "/docs/api/management-api-keys-revoke/",
+    title: "POST /management/api-keys/{id}/revoke",
+    summary: "Revoke a generated API key.",
+    icon: "bx-key-minus",
+    keywords: ["management api", "api keys", "revoke"]
+  },
+  {
+    href: "/docs/api/management-webhooks-list/",
+    title: "GET /management/webhooks",
+    summary: "List configured webhook endpoints.",
+    icon: "bx-link-alt",
+    keywords: ["management api", "webhooks", "list"]
+  },
+  {
+    href: "/docs/api/management-webhooks-deliveries/",
+    title: "GET /management/webhooks/deliveries",
+    summary: "List recent webhook delivery runs.",
+    icon: "bx-list-check",
+    keywords: ["management api", "webhooks", "deliveries", "run log"]
+  },
+  {
+    href: "/docs/api/management-webhooks-create/",
+    title: "POST /management/webhooks",
+    summary: "Create a webhook endpoint configuration.",
+    icon: "bx-plus-circle",
+    keywords: ["management api", "webhooks", "create"]
+  },
+  {
+    href: "/docs/api/management-webhooks-update/",
+    title: "PATCH /management/webhooks/{id}",
+    summary: "Update webhook endpoint configuration.",
+    icon: "bx-edit",
+    keywords: ["management api", "webhooks", "update"]
+  },
+  {
+    href: "/docs/api/management-webhooks-delete/",
+    title: "DELETE /management/webhooks/{id}",
+    summary: "Delete a webhook endpoint.",
+    icon: "bx-trash",
+    keywords: ["management api", "webhooks", "delete"]
+  },
+  {
+    href: "/docs/api/management-offline-signing-keys-list/",
+    title: "GET /management/offline/signing-keys",
+    summary: "List offline JWT signing keys.",
+    icon: "bx-list-ul",
+    keywords: ["management api", "offline", "signing keys", "list"]
+  },
+  {
+    href: "/docs/api/management-offline-signing-keys-create/",
+    title: "POST /management/offline/signing-keys",
+    summary: "Create an Ed25519 signing key pair.",
+    icon: "bx-key",
+    keywords: ["management api", "offline", "signing keys", "create", "ed25519"]
+  },
+  {
+    href: "/docs/api/management-offline-signing-keys-activate/",
+    title: "POST /management/offline/signing-keys/{id}/activate",
+    summary: "Activate a signing key for new offline tokens.",
+    icon: "bx-check-shield",
+    keywords: ["management api", "offline", "signing keys", "activate"]
+  },
+  {
+    href: "/docs/api/management-offline-signing-keys-retire/",
+    title: "POST /management/offline/signing-keys/{id}/retire",
+    summary: "Retire an offline signing key.",
+    icon: "bx-key-minus",
+    keywords: ["management api", "offline", "signing keys", "retire"]
+  },
+  {
+    href: "/docs/api/management-offline-public-keys-list/",
+    title: "GET /management/offline/public-keys",
+    summary: "Export public keys for offline JWT verification.",
+    icon: "bx-export",
+    keywords: ["management api", "offline", "public keys", "export", "jwt"]
+  }
+];

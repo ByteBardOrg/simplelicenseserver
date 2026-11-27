@@ -1,22 +1,26 @@
 # Simple License Server API
 
-Current API version: `0.4.0`
+Current API version: `0.5.0`
 
-This repository contains the Go API implementation for the license and management flows described in `simple-license-server.md`.
+This repository contains the Go API, the bundled management UI, and the documentation website for Simple License Server.
 
 ## Implemented endpoints
 
 License API:
 
 - `GET /healthz`
-- `POST /generate` (generated server API key required)
-- `POST /revoke` (generated server API key required)
-- `POST /activate`
-- `POST /validate`
-- `POST /deactivate`
+- `POST /api/v1/generate` (generated server API key required)
+- `POST /api/v1/revoke` (generated server API key required)
+- `POST /api/v1/activate`
+- `POST /api/v1/validate`
+- `POST /api/v1/deactivate`
 
 Management API:
 
+- `GET /management/licenses`
+- `GET /management/licenses/{id}`
+- `PATCH /management/licenses/{id}`
+- `DELETE /management/licenses/{id}/activations/{activationID}`
 - `GET /management/slugs`
 - `POST /management/slugs`
 - `GET /management/slugs/{name}`
@@ -29,18 +33,20 @@ Management API:
 - `POST /management/webhooks`
 - `PATCH /management/webhooks/{id}`
 - `DELETE /management/webhooks/{id}`
+- `POST /management/webhooks/{id}/rotate-secret`
+- `GET /management/webhooks/deliveries`
 - `GET /management/offline/signing-keys`
 - `POST /management/offline/signing-keys`
 - `POST /management/offline/signing-keys/{id}/activate`
 - `POST /management/offline/signing-keys/{id}/retire`
 - `GET /management/offline/public-keys`
 
-`POST /generate` supports idempotency via the `Idempotency-Key` request header.
+`POST /api/v1/generate` supports idempotency via the `Idempotency-Key` request header.
 
 ## Local development
 
 1. Start Postgres.
-2. Copy `.env.example` values into your environment.
+2. Copy `.env.example` values into your environment and fill in `MANAGEMENT_API_KEYS` and `OFFLINE_SIGNING_ENCRYPTION_KEY` with your own secrets (`openssl rand -hex 32`). Example values published in the docs are refused at startup unless `ALLOW_EXAMPLE_SECRETS=true`.
 3. Run:
 
 ```bash
@@ -71,10 +77,10 @@ curl -sS http://localhost:8080/management/api-keys \
   -d '{"name":"local-dev"}'
 ```
 
-2) Use returned `api_key` against `/generate`:
+2) Use returned `api_key` against `/api/v1/generate`:
 
 ```bash
-curl -sS http://localhost:8080/generate \
+curl -sS http://localhost:8080/api/v1/generate \
   -H "Authorization: Bearer <generated_server_api_key>" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: evt_123" \
@@ -84,8 +90,8 @@ curl -sS http://localhost:8080/generate \
 ## Authentication
 
 - Management API routes require env bootstrap keys from `MANAGEMENT_API_KEYS` or `MANAGEMENT_API_KEY`.
-- Provisioning routes (`/generate`, `/revoke`) require generated active server API keys from the management API.
-- Runtime routes (`/activate`, `/validate`, `/deactivate`) use `license_key` + `fingerprint` and do not use API keys.
+- Provisioning routes (`/api/v1/generate`, `/api/v1/revoke`) require generated active server API keys from the management API.
+- Runtime routes (`/api/v1/activate`, `/api/v1/validate`, `/api/v1/deactivate`) use `license_key` + `fingerprint` and do not use API keys. They share one response shape (`valid`, `reason`, `license`, optional `token`) and return HTTP 200 for every decided outcome, including unknown keys (`reason: "not_found"`).
 
 Both key-protected surfaces accept either:
 
@@ -105,22 +111,26 @@ Timeout controls:
 Rate limiting defaults:
 
 - `RATE_LIMIT_ENABLED` (default `true`)
-- `RATE_LIMIT_GLOBAL_RPS` (default `100`)
-- `RATE_LIMIT_GLOBAL_BURST` (default `200`)
+- `RATE_LIMIT_GLOBAL_RPS` (default `0`, off; a cap shared by all clients lets a few abusers lock everyone out)
+- `RATE_LIMIT_GLOBAL_BURST` (required when the global limit is on)
 - `RATE_LIMIT_PER_IP_RPS` (default `20`)
 - `RATE_LIMIT_PER_IP_BURST` (default `40`)
 - `RATE_LIMIT_IP_TTL` (default `10m`)
 - `RATE_LIMIT_MAX_IP_ENTRIES` (default `10000`)
-- `TRUST_PROXY_HEADERS` (default `false`)
+- Per-IP budgets are kept separately for the public runtime routes (`/api/v1/activate|validate|deactivate`) and everything else. The bundled UI's static files are not rate limited.
+- `CLIENT_IP_HEADER` (default empty: use the TCP peer address). Behind a proxy, name the header that carries the real client IP, for example `CF-Connecting-IP` behind Cloudflare. `X-Forwarded-For` uses the rightmost entry. Only set this when the server is reachable solely through that proxy.
+- `AUTH_FAILURE_MAX_ATTEMPTS` (default `10`, `0` disables) and `AUTH_FAILURE_WINDOW` (default `15m`): wrong management or server API keys from one IP within the window lock that IP out of key-protected routes (HTTP 429) until the window ends.
+- `TRUST_PROXY_HEADERS` was removed in 0.5.0; setting it to `true` stops startup with a pointer to `CLIENT_IP_HEADER`.
 
 Offline token defaults:
 
 - Offline JWT issuance is controlled per slug with `offline_enabled` and `offline_token_lifetime_hours`.
 - Slugs also support `attributes` (JSON object) for license information such as feature flags or plan metadata.
-- Slug `attributes` are snapshotted onto each generated license and returned by `/generate` and management license listing endpoints.
+- Slugs have an optional `product` naming the app their licenses are for. Runtime responses return it as `license.product`, and offline JWTs carry it as `aud` (falling back to `OFFLINE_TOKEN_AUDIENCE`). Apps should check both, plus the token `fingerprint`.
+- Slug `attributes` are snapshotted onto each generated license and returned by `/api/v1/generate`, the runtime endpoints (`license.attributes`), and the management license endpoints.
 - Offline JWTs include the snapshotted license `attributes` as a nested `attributes` claim.
 - All slugs, including the seeded `default` slug, default to offline disabled.
-- `POST /activate` and valid `POST /validate` responses include `token` only when the license slug has offline enabled and an active signing key exists.
+- `POST /api/v1/activate` and valid `POST /api/v1/validate` responses include `token` only when the license slug has offline enabled and an active signing key exists.
 - `OFFLINE_SIGNING_ENCRYPTION_KEY` encrypts signing private keys at rest and must be at least 32 characters before creating or using signing keys.
 - `OFFLINE_TOKEN_ISSUER` defaults to `simple-license-server`.
 - `OFFLINE_TOKEN_AUDIENCE` is optional.

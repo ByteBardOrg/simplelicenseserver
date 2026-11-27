@@ -1,78 +1,84 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Layers, Plus } from 'lucide-vue-next'
+import PageHeader from '@/components/PageHeader.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
+import ConfirmButton from '@/components/ConfirmButton.vue'
+import ToggleSwitch from '@/components/ToggleSwitch.vue'
+import UiDrawer from '@/components/UiDrawer.vue'
 import { slugAPI } from '@/stores/api'
+import { toast, toastError } from '@/lib/ui'
+import { endOfLocalDay, errorMessage, formatExpiration, formatLifetime, hasKeys, parseJSONObject, prettyJSON, toDateInputValue } from '@/lib/format'
 
-const loading = ref(false)
-const saving = ref(false)
-const error = ref('')
 const slugs = ref([])
-const editing = ref('')
+const loading = ref(false)
+const loadError = ref('')
 const showArchived = ref(false)
 
-const form = reactive({
+const drawerOpen = ref(false)
+const editing = ref(null)
+const saving = ref(false)
+const formError = ref('')
+
+const emptyForm = () => ({
   name: '',
   max_activations: 1,
   expiration_type: 'forever',
-  expiration_days: '',
+  expiration_days: 365,
   fixed_expires_at: '',
   offline_enabled: false,
   offline_token_lifetime_hours: 24,
-  attributes: '{\n  "features": []\n}',
+  attributes: '',
+  product: '',
 })
 
-const resetForm = () => {
-  form.name = ''
-  form.max_activations = 1
-  form.expiration_type = 'forever'
-  form.expiration_days = ''
-  form.fixed_expires_at = ''
-  form.offline_enabled = false
-  form.offline_token_lifetime_hours = 24
-  form.attributes = '{\n  "features": []\n}'
-  editing.value = ''
-}
+const form = reactive(emptyForm())
 
-const parseJSONObject = (raw, fieldName) => {
-  const trimmed = raw.trim()
-  if (!trimmed) {
-    return {}
+const expirationOptions = [
+  { value: 'forever', label: 'Never' },
+  { value: 'duration', label: 'After a period' },
+  { value: 'fixed_date', label: 'On a date' },
+]
+
+const archivedCount = computed(() => slugs.value.filter((slug) => slug.deleted_at).length)
+const knownProducts = computed(() => [...new Set(slugs.value.map((slug) => slug.product).filter(Boolean))].sort())
+
+const load = async () => {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const res = await slugAPI.list({ include_archived: showArchived.value })
+    slugs.value = res.data.slugs || []
+  } catch (err) {
+    loadError.value = errorMessage(err, 'Failed to load slugs')
+  } finally {
+    loading.value = false
   }
-
-  const parsed = JSON.parse(trimmed)
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-    throw new Error(`${fieldName} must be a JSON object`)
-  }
-
-  return parsed
 }
 
-const parseLocalExpirationDate = (value) => {
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (!match) return null
-
-  const [, year, month, day] = match.map(Number)
-  const date = new Date(year, month - 1, day, 23, 59, 59)
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-    return null
-  }
-
-  return date
+const openCreate = () => {
+  Object.assign(form, emptyForm())
+  editing.value = null
+  formError.value = ''
+  drawerOpen.value = true
 }
 
-const toDateInputValue = (value) => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-
-  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-  return offsetDate.toISOString().slice(0, 10)
-}
-
-const formatDate = (value) => {
-  if (!value) return 'Not set'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Not set'
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
+const openEdit = (slug) => {
+  if (slug.deleted_at) return
+  Object.assign(form, {
+    name: slug.name,
+    max_activations: slug.max_activations,
+    expiration_type: slug.expiration_type,
+    expiration_days: slug.expiration_days ?? 365,
+    fixed_expires_at: toDateInputValue(slug.fixed_expires_at),
+    offline_enabled: Boolean(slug.offline_enabled),
+    offline_token_lifetime_hours: slug.offline_token_lifetime_hours || 24,
+    attributes: hasKeys(slug.attributes) ? prettyJSON(slug.attributes) : '',
+    product: slug.product || '',
+  })
+  editing.value = slug
+  formError.value = ''
+  drawerOpen.value = true
 }
 
 const buildPayload = () => {
@@ -83,230 +89,221 @@ const buildPayload = () => {
     offline_enabled: form.offline_enabled,
     offline_token_lifetime_hours: Number(form.offline_token_lifetime_hours),
     attributes: parseJSONObject(form.attributes, 'Attributes'),
+    product: form.product.trim(),
   }
 
-  if (form.expiration_type === 'duration' && form.expiration_days !== '') {
+  if (form.expiration_type === 'duration') {
     payload.expiration_days = Number(form.expiration_days)
   }
 
   if (form.expiration_type === 'fixed_date') {
-    if (!form.fixed_expires_at) {
-      throw new Error('Enter a fixed expiration date')
-    }
-    const fixedDate = parseLocalExpirationDate(form.fixed_expires_at)
-    if (!fixedDate) {
-      throw new Error('Enter a valid fixed expiration date')
-    }
-    payload.fixed_expires_at = fixedDate.toISOString()
+    const date = endOfLocalDay(form.fixed_expires_at || '')
+    if (!date) throw new Error('Pick an expiration date')
+    payload.fixed_expires_at = date.toISOString()
   }
 
   return payload
 }
 
-const loadSlugs = async () => {
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await slugAPI.list({ include_archived: showArchived.value })
-    slugs.value = res.data.slugs || []
-  } catch (err) {
-    error.value = err?.response?.data?.error || 'Failed to load slugs'
-  } finally {
-    loading.value = false
-  }
-}
-
-const submit = async () => {
+const save = async () => {
+  formError.value = ''
   saving.value = true
-  error.value = ''
   try {
+    const payload = buildPayload()
     if (editing.value) {
-      await slugAPI.update(editing.value, buildPayload())
+      await slugAPI.update(editing.value.name, payload)
+      toast(`Saved ${payload.name}`)
     } else {
-      await slugAPI.create(buildPayload())
+      await slugAPI.create(payload)
+      toast(`Created ${payload.name}`)
     }
-    resetForm()
-    await loadSlugs()
+    drawerOpen.value = false
+    await load()
   } catch (err) {
-    error.value = err?.response?.data?.error || err?.message || 'Failed to save slug'
+    formError.value = errorMessage(err, 'Could not save slug')
   } finally {
     saving.value = false
   }
 }
 
-const editSlug = (slug) => {
-  if (slug.deleted_at) {
-    return
-  }
-  editing.value = slug.name
-  form.name = slug.name
-  form.max_activations = slug.max_activations
-  form.expiration_type = slug.expiration_type
-  form.expiration_days = slug.expiration_days ?? ''
-  form.fixed_expires_at = toDateInputValue(slug.fixed_expires_at)
-  form.offline_enabled = Boolean(slug.offline_enabled)
-  form.offline_token_lifetime_hours = slug.offline_token_lifetime_hours || 24
-  form.attributes = JSON.stringify(slug.attributes || {}, null, 2)
-}
-
-const removeSlug = async (slug) => {
-  if (slug.deleted_at) {
-    return
-  }
-  if (!confirm(`Delete slug "${slug.name}"?`)) {
-    return
-  }
-
-  error.value = ''
+const remove = async () => {
+  if (!editing.value) return
+  const name = editing.value.name
   try {
-    await slugAPI.delete(slug.name)
-    await loadSlugs()
+    await slugAPI.delete(name)
+    toast(`Archived ${name}`)
+    drawerOpen.value = false
+    await load()
   } catch (err) {
-    error.value = err?.response?.data?.error || 'Failed to delete slug'
+    toastError(errorMessage(err, 'Could not delete slug'))
   }
 }
 
-const formatExpiration = (slug) => {
-  if (slug.expiration_type === 'duration') return `${slug.expiration_days} days`
-  if (slug.expiration_type === 'fixed_date') return formatDate(slug.fixed_expires_at)
-  return 'Never expires'
+const toggleArchived = () => {
+  showArchived.value = !showArchived.value
+  load()
 }
 
-const formatOfflineLifetime = (hours) => {
-  const value = Number(hours || 0)
-  if (value <= 0) return 'Not set'
-  if (value % 24 === 0) return `${value / 24}d`
-  return `${value}h`
-}
-
-onMounted(loadSlugs)
+onMounted(load)
 </script>
 
 <template>
-  <div class="grid gap-5 xl:grid-cols-[22rem_minmax(0,1fr)]">
-    <section class="rounded-lg bg-[#171b26] p-4 sm:p-5">
-      <p class="metadata-label text-xs font-bold text-[#8f98ad]">Slug Template</p>
-      <h1 class="mt-2 text-xl font-black tracking-tight text-white">{{ editing ? 'Edit slug.' : 'Create slug.' }}</h1>
-      <p class="mt-2 text-sm leading-6 text-[#8f98ad]">Slug settings define generated license limits and expiration behavior.</p>
-      <p v-if="error" class="mt-4 text-sm text-[#ff7a8a]">{{ error }}</p>
+  <div>
+    <PageHeader title="Slugs" description="Templates for new licenses. A slug sets how many devices a key allows, when it expires, and what it unlocks.">
+      <button class="btn-primary" @click="openCreate">
+        <Plus class="h-4 w-4" :stroke-width="2.4" /> New slug
+      </button>
+    </PageHeader>
 
-      <form class="mt-5 space-y-4" @submit.prevent="submit">
-        <label class="block text-sm text-[#c6ccdc]">
-          <span class="mb-2 block text-xs font-semibold text-white">Name</span>
-          <input v-model="form.name" required class="field-control text-sm" />
-        </label>
+    <section class="card mt-8 p-2">
+      <p v-if="loadError" class="px-4 py-10 text-center text-sm text-critical">{{ loadError }}</p>
 
-        <label class="block text-sm text-[#c6ccdc]">
-          <span class="mb-2 block text-xs font-semibold text-white">Max Activations</span>
-          <input v-model="form.max_activations" min="1" type="number" required class="field-control text-sm" />
-        </label>
-
-        <label class="block text-sm text-[#c6ccdc]">
-          <span class="mb-2 block text-xs font-semibold text-white">Expiration Type</span>
-          <select v-model="form.expiration_type" class="field-control text-sm">
-            <option value="forever">forever</option>
-            <option value="duration">duration</option>
-            <option value="fixed_date">fixed_date</option>
-          </select>
-        </label>
-
-        <label v-if="form.expiration_type === 'duration'" class="block text-sm text-[#c6ccdc]">
-          <span class="mb-2 block text-xs font-semibold text-white">Expiration Days</span>
-          <input v-model="form.expiration_days" min="1" type="number" class="field-control text-sm" />
-        </label>
-
-        <label v-if="form.expiration_type === 'fixed_date'" class="block text-sm text-[#c6ccdc]">
-          <span class="mb-2 block text-xs font-semibold text-white">Fixed Expiration Date</span>
-          <input v-model="form.fixed_expires_at" type="date" class="field-control text-sm" />
-          <span class="mt-2 block text-xs text-[#8f98ad]">Expires automatically at 11:59:59 PM local time.</span>
-        </label>
-
-        <label class="flex items-start gap-3 rounded-md bg-[#1c1f2a] px-3 py-3 text-sm text-[#c6ccdc]">
-          <input v-model="form.offline_enabled" type="checkbox" class="mt-1 accent-[#a4c9ff]" />
-          <span>
-            <span class="block text-xs font-semibold text-white">Offline JWTs</span>
-            <span class="mt-1 block text-xs leading-5 text-[#8f98ad]">Allow activated seats for this slug to receive refreshed offline tokens.</span>
-          </span>
-        </label>
-
-        <label v-if="form.offline_enabled" class="block text-sm text-[#c6ccdc]">
-          <span class="mb-2 block text-xs font-semibold text-white">Offline Token Lifetime (hours)</span>
-          <input v-model="form.offline_token_lifetime_hours" min="1" type="number" class="field-control text-sm" />
-          <span class="mt-2 block text-xs text-[#8f98ad]">Default is 24 hours. License expiration still caps token expiration.</span>
-        </label>
-
-        <label class="block text-sm text-[#c6ccdc]">
-          <span class="mb-2 block text-xs font-semibold text-white">Attributes JSON</span>
-          <textarea v-model="form.attributes" rows="7" class="field-control font-mono text-xs"></textarea>
-          <span class="mt-2 block text-xs text-[#8f98ad]">License information to snapshot into generated licenses and JWT claims.</span>
-        </label>
-
-        <div class="flex gap-2 pt-1">
-          <button :disabled="saving" class="primary-action px-4 py-2 text-sm disabled:opacity-60">
-            {{ editing ? 'Update Slug' : 'Create Slug' }}
-          </button>
-          <button v-if="editing" type="button" class="secondary-action px-4 py-2 text-sm" @click="resetForm">Cancel</button>
-        </div>
-      </form>
-    </section>
-
-    <section class="rounded-lg bg-[#171b26] p-4 sm:p-5">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 class="text-xl font-black tracking-tight text-white">Configured slugs.</h2>
-          <p class="mt-1 text-sm text-[#8f98ad]">{{ slugs.length }} slug templates {{ showArchived ? 'loaded' : 'available' }}</p>
-        </div>
-        <div class="flex items-center gap-2">
-          <label class="flex items-center gap-2 rounded-md bg-[#1c1f2a] px-3 py-2 text-xs text-[#c6ccdc]">
-            <input v-model="showArchived" type="checkbox" class="accent-[#a4c9ff]" @change="loadSlugs" />
-            Show archived
-          </label>
-          <button class="secondary-action px-3 py-2 text-xs" @click="loadSlugs">Refresh</button>
-        </div>
+      <div v-else-if="!loading && slugs.length === 0" class="flex flex-col items-center px-4 py-16 text-center">
+        <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-surface-container text-ink-muted shadow-ghost">
+          <Layers class="h-5 w-5" :stroke-width="1.8" />
+        </span>
+        <p class="mt-4 font-medium text-ink">No slugs</p>
+        <p class="mt-1 text-sm text-ink-muted">Create one to define seats and expiry for new licenses.</p>
       </div>
 
-      <p v-if="loading" class="mt-6 rounded-md bg-[#1c1f2a] px-3 py-8 text-center text-sm text-[#8f98ad]">Loading slugs...</p>
-      <p v-else-if="slugs.length === 0" class="mt-6 rounded-md bg-[#1c1f2a] px-3 py-8 text-center text-sm text-[#8f98ad]">No slugs found.</p>
-
-      <div v-else class="mt-4 overflow-x-auto">
-        <table class="min-w-full text-left text-sm">
-          <thead class="metadata-label text-xs text-[#8f98ad]">
+      <div v-else class="overflow-x-auto">
+        <table class="data-table" :class="loading ? 'opacity-60 transition-opacity' : ''">
+          <thead>
             <tr>
-              <th class="px-3 py-3 font-bold">Name</th>
-              <th class="px-3 py-3 font-bold">Max</th>
-              <th class="px-3 py-3 font-bold">Expiration</th>
-              <th class="px-3 py-3 font-bold">Offline</th>
-              <th class="px-3 py-3 font-bold">Token TTL</th>
-              <th class="px-3 py-3 font-bold">Default</th>
-              <th class="px-3 py-3 text-right font-bold">Actions</th>
+              <th>Name</th>
+              <th>Product</th>
+              <th>Seats</th>
+              <th>Expiry</th>
+              <th>Offline tokens</th>
+              <th class="text-right">Attributes</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="slug in slugs" :key="slug.id" class="group">
-              <td class="rounded-l-md bg-[#1c1f2a] px-3 py-3 font-semibold group-hover:bg-[#262a35]" :class="slug.deleted_at ? 'text-[#8f98ad] line-through' : 'text-[#dfe2f1]'">
-                {{ slug.name }}
+            <tr
+              v-for="slug in slugs"
+              :key="slug.id"
+              :class="slug.deleted_at ? 'opacity-50' : 'is-clickable'"
+              @click="openEdit(slug)"
+            >
+              <td class="w-full">
+                <div class="flex items-center gap-2.5">
+                  <span class="font-medium text-ink-strong" :class="slug.deleted_at ? 'line-through' : ''">{{ slug.name }}</span>
+                  <StatusBadge v-if="slug.is_default && slug.name !== 'default'" status="active" label="default" />
+                  <StatusBadge v-if="slug.deleted_at" status="archived" />
+                </div>
               </td>
-              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]" :class="slug.deleted_at ? 'text-[#8f98ad]' : 'text-[#dfe2f1]'">{{ slug.max_activations }}</td>
-              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]" :class="slug.deleted_at ? 'text-[#8f98ad]' : 'text-[#dfe2f1]'">{{ formatExpiration(slug) }}</td>
-              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]">
-                <span class="inline-flex rounded-md px-2 py-1 metadata-label text-[0.65rem] font-bold" :class="slug.offline_enabled ? 'bg-[#4ae176]/10 text-[#4ae176]' : 'bg-[#8f98ad]/10 text-[#8f98ad]'">
-                  {{ slug.offline_enabled ? 'Enabled' : 'Disabled' }}
-                </span>
+              <td class="whitespace-nowrap font-mono text-xs" :class="slug.product ? 'text-ink-soft' : 'text-ink-faint'">{{ slug.product || '—' }}</td>
+              <td class="whitespace-nowrap tabular-nums text-ink-soft">{{ slug.max_activations }}</td>
+              <td class="whitespace-nowrap text-ink-soft">{{ formatExpiration(slug) }}</td>
+              <td class="whitespace-nowrap text-ink-soft">
+                <span v-if="slug.offline_enabled">{{ formatLifetime(slug.offline_token_lifetime_hours) }}</span>
+                <span v-else class="text-ink-faint">Off</span>
               </td>
-              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]" :class="slug.deleted_at ? 'text-[#8f98ad]' : 'text-[#dfe2f1]'">{{ formatOfflineLifetime(slug.offline_token_lifetime_hours) }}</td>
-              <td class="bg-[#1c1f2a] px-3 py-3 group-hover:bg-[#262a35]">
-                <span class="inline-flex rounded-md px-2 py-1 metadata-label text-[0.65rem] font-bold" :class="slug.deleted_at ? 'bg-[#ffb347]/10 text-[#ffb347]' : (slug.is_default ? 'bg-[#4ae176]/10 text-[#4ae176]' : 'bg-[#a4c9ff]/10 text-[#a4c9ff]')">
-                  {{ slug.deleted_at ? 'Archived' : (slug.is_default ? 'Default' : 'Custom') }}
-                </span>
-              </td>
-              <td class="rounded-r-md bg-[#1c1f2a] px-3 py-3 text-right group-hover:bg-[#262a35]">
-                <button class="metadata-label text-[0.65rem] font-bold text-[#a4c9ff] transition hover:text-white disabled:text-[#8f98ad] disabled:opacity-50" :disabled="Boolean(slug.deleted_at)" @click="editSlug(slug)">Edit</button>
-                <button class="ml-4 metadata-label text-[0.65rem] font-bold text-[#ff7a8a] transition hover:text-white disabled:text-[#8f98ad] disabled:opacity-50" :disabled="slug.is_default || Boolean(slug.deleted_at)" @click="removeSlug(slug)">Delete</button>
+              <td class="whitespace-nowrap text-right tabular-nums text-ink-muted">
+                {{ hasKeys(slug.attributes) ? Object.keys(slug.attributes).length : '—' }}
               </td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
+
+    <div class="mt-3 flex justify-end">
+      <button class="btn-ghost px-2.5 py-1 text-xs" @click="toggleArchived">
+        {{ showArchived ? `Hide archived${archivedCount ? ` (${archivedCount})` : ''}` : 'Show archived' }}
+      </button>
+    </div>
+
+    <UiDrawer :open="drawerOpen" :eyebrow="editing ? 'Edit slug' : 'New slug'" :title="editing ? editing.name : 'Create a slug'" @close="drawerOpen = false">
+      <form id="slug-form" class="space-y-5" @submit.prevent="save">
+        <div class="grid grid-cols-[minmax(0,1fr)_7rem] gap-3">
+          <label class="block">
+            <span class="field-label">Name</span>
+            <input v-model="form.name" required placeholder="pro-yearly" class="field font-mono" />
+          </label>
+          <label class="block">
+            <span class="field-label">Seats</span>
+            <input v-model="form.max_activations" min="1" type="number" required class="field tabular-nums" />
+          </label>
+        </div>
+
+        <label class="block">
+          <span class="field-label">Product <span class="text-ink-faint">· optional</span></span>
+          <input v-model="form.product" list="known-products" placeholder="desktop-app" class="field font-mono" />
+          <datalist id="known-products">
+            <option v-for="product in knownProducts" :key="product" :value="product" />
+          </datalist>
+          <span class="field-hint">
+            Which app these licenses are for. Give every plan of the same app the same product. Apps get it as
+            <code class="font-mono">license.product</code>, and offline tokens carry it as <code class="font-mono">aud</code>.
+          </span>
+        </label>
+
+        <div>
+          <span class="field-label">Expires</span>
+          <div class="grid grid-cols-3 gap-1 rounded-lg bg-surface-lowest/70 p-1 shadow-ghost">
+            <button
+              v-for="option in expirationOptions"
+              :key="option.value"
+              type="button"
+              class="rounded-md px-2 py-1.5 text-xs font-medium transition"
+              :class="form.expiration_type === option.value ? 'bg-surface-high text-ink-strong shadow-ghost' : 'text-ink-muted hover:text-ink'"
+              @click="form.expiration_type = option.value"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+
+          <label v-if="form.expiration_type === 'duration'" class="mt-3 flex items-center gap-3">
+            <input v-model="form.expiration_days" min="1" type="number" required class="field w-28 tabular-nums" />
+            <span class="text-sm text-ink-muted">days after the license is issued</span>
+          </label>
+
+          <label v-if="form.expiration_type === 'fixed_date'" class="mt-3 block">
+            <input v-model="form.fixed_expires_at" type="date" required class="field" />
+            <span class="field-hint">Every license from this slug expires at the end of this day.</span>
+          </label>
+        </div>
+
+        <div>
+          <ToggleSwitch
+            v-model="form.offline_enabled"
+            label="Offline tokens"
+            hint="Activations get a signed JWT the app can verify without calling the server."
+          />
+          <label v-if="form.offline_enabled" class="mt-3 flex items-center gap-3">
+            <input v-model="form.offline_token_lifetime_hours" min="1" type="number" required class="field w-28 tabular-nums" />
+            <span class="text-sm text-ink-muted">hours before a token must be refreshed</span>
+          </label>
+        </div>
+
+        <label class="block">
+          <span class="field-label">Attributes <span class="text-ink-faint">· optional</span></span>
+          <textarea
+            v-model="form.attributes"
+            rows="9"
+            spellcheck="false"
+            class="field font-mono text-xs leading-relaxed"
+            placeholder='{ "features": ["export", "sync"] }'
+          ></textarea>
+          <span class="field-hint">Copied onto each license when it is issued and included in offline tokens.</span>
+        </label>
+
+        <p v-if="formError" class="rounded-lg bg-critical/10 px-3 py-2 text-sm text-critical">{{ formError }}</p>
+      </form>
+
+      <template #footer>
+        <ConfirmButton
+          v-if="editing && !editing.is_default"
+          label="Delete"
+          confirm-label="Confirm delete"
+          @confirm="remove"
+        />
+        <button class="btn-ghost ml-auto" @click="drawerOpen = false">Cancel</button>
+        <button class="btn-primary" type="submit" form="slug-form" :disabled="saving">
+          {{ saving ? 'Saving…' : editing ? 'Save changes' : 'Create slug' }}
+        </button>
+      </template>
+    </UiDrawer>
   </div>
 </template>

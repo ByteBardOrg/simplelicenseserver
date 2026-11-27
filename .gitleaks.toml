@@ -1,0 +1,6 @@
+[allowlist]
+description = "Critiq file allowlist"
+paths = [
+    "(?:^|/)website/index\\.html$",
+    "(?:^|/)README\\.md$",
+]

@@ -1,4 +1,5 @@
-FROM golang:1.25-alpine AS builder
+# Build with a current Go release: standard library security fixes only ship in new Go versions.
+FROM golang:1.27-alpine AS builder
 
 WORKDIR /app
 
@@ -20,12 +21,15 @@ RUN npm ci
 COPY ui ./
 RUN npm run build
 
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12:nonroot
 
 WORKDIR /app
 COPY --from=builder /out/simple-license-server /app/simple-license-server
 COPY --from=ui-builder /ui/dist /app/ui
 
 EXPOSE 8080
+
+# Run as the unprivileged "nonroot" user (uid 65532) from the base image, not root.
+USER nonroot:nonroot
 
 ENTRYPOINT ["/app/simple-license-server"]
