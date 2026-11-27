@@ -6,7 +6,7 @@ const props = defineProps({
   label: { type: String, default: '' },
 })
 
-// Maps every status the API can return onto the four semantic tones from DESIGN.md.
+// Maps every status the API can return onto four semantic tones (success, neutral, warning, critical) plus muted.
 const tones = {
   active: 'success',
   enabled: 'success',

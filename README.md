@@ -2,7 +2,7 @@
 
 Current API version: `0.5.0`
 
-This repository contains the Go API implementation for the license and management flows described in `simple-license-server.md`.
+This repository contains the Go API, the bundled management UI, and the documentation website for Simple License Server.
 
 ## Implemented endpoints
 
