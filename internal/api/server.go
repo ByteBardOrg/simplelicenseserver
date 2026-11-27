@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -92,7 +93,7 @@ type Server struct {
 	rateLimiter            *ipRateLimiter
 	authLimiter            *authFailureLimiter
 	verifiedKeysMu         sync.RWMutex
-	verifiedKeys           map[[32]byte]struct{}
+	verifiedKeys           [][]byte
 	clientIPHeader         string
 	uiEnabled              bool
 	uiDistDir              string
@@ -223,7 +224,6 @@ func NewServerWithOptions(service licenseService, logger *slog.Logger, managemen
 		offlineTokenIssuer:     strings.TrimSpace(opts.OfflineTokenIssuer),
 		offlineTokenAudience:   strings.TrimSpace(opts.OfflineTokenAudience),
 		clientIPHeader:         strings.TrimSpace(opts.ClientIPHeader),
-		verifiedKeys:           make(map[[32]byte]struct{}),
 		authLimiter:            newAuthFailureLimiter(opts.AuthFailureMaxAttempts, opts.AuthFailureWindow, opts.RateLimitMaxIPEntries),
 		rateLimiter: newIPRateLimiter(rateLimiterConfig{
 			enabled:      opts.RateLimitEnabled,
@@ -363,26 +363,39 @@ func (s *Server) isAuthorizedManagementKey(candidate string) bool {
 		return false
 	}
 
-	// bcrypt costs ~200ms of CPU per comparison. Once a key has verified, remember its SHA-256 so
-	// later requests with it are instant; only correct keys are cached, so the set stays tiny.
-	digest := sha256.Sum256([]byte(candidate))
+	// bcrypt costs ~200ms of CPU per comparison. Once a key has passed bcrypt, keep that key and
+	// accept later requests with a constant-time comparison instead. Only keys that verified are
+	// kept, so the list never grows past the number of configured management keys. No fast hash of
+	// the key is ever computed or stored.
+	presented := []byte(candidate)
 	s.verifiedKeysMu.RLock()
-	_, known := s.verifiedKeys[digest]
-	s.verifiedKeysMu.RUnlock()
-	if known {
-		return true
+	for _, known := range s.verifiedKeys {
+		if subtle.ConstantTimeCompare(known, presented) == 1 {
+			s.verifiedKeysMu.RUnlock()
+			return true
+		}
 	}
+	s.verifiedKeysMu.RUnlock()
 
 	for _, keyHash := range s.managementAPIKeyHashes {
-		if err := bcrypt.CompareHashAndPassword(keyHash, []byte(candidate)); err == nil {
-			s.verifiedKeysMu.Lock()
-			s.verifiedKeys[digest] = struct{}{}
-			s.verifiedKeysMu.Unlock()
+		if err := bcrypt.CompareHashAndPassword(keyHash, presented); err == nil {
+			s.rememberVerifiedKey(presented)
 			return true
 		}
 	}
 
 	return false
+}
+
+func (s *Server) rememberVerifiedKey(key []byte) {
+	s.verifiedKeysMu.Lock()
+	defer s.verifiedKeysMu.Unlock()
+	for _, known := range s.verifiedKeys {
+		if subtle.ConstantTimeCompare(known, key) == 1 {
+			return
+		}
+	}
+	s.verifiedKeys = append(s.verifiedKeys, append([]byte(nil), key...))
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
